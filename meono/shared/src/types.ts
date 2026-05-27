@@ -1,0 +1,56 @@
+export const CardType = {
+  EXPLODING_KITTEN: 'EXPLODING_KITTEN',
+  DEFUSE: 'DEFUSE',
+  ATTACK: 'ATTACK',
+  SKIP: 'SKIP',
+  FAVOR: 'FAVOR',
+  SHUFFLE: 'SHUFFLE',
+  SEE_THE_FUTURE: 'SEE_THE_FUTURE',
+  NOPE: 'NOPE',
+  CAT_CARD_1: 'CAT_CARD_1',
+  CAT_CARD_2: 'CAT_CARD_2',
+  CAT_CARD_3: 'CAT_CARD_3',
+  CAT_CARD_4: 'CAT_CARD_4',
+  CAT_CARD_5: 'CAT_CARD_5',
+} as const;
+
+export type CardType = typeof CardType[keyof typeof CardType];
+
+export interface Card {
+  id: string;
+  type: CardType;
+  name: string;
+  description: string;
+}
+
+export interface PlayerState {
+  id: string;
+  name: string;
+  handCount: number;
+  isBot: boolean;
+  turnsToPlay: number;
+  isEliminated: boolean;
+  hand?: Card[]; 
+}
+
+export interface GameState {
+  status: 'LOBBY' | 'PLAYING' | 'GAME_OVER';
+  players: PlayerState[];
+  currentPlayerId: string | null;
+  drawPileCount: number;
+  discardPile: Card[];
+  lastAction: string | null;
+  winner: string | null;
+  waitingForDefuse: string | null;
+  bombCountdown?: number; 
+  lastTheft?: {
+    stealerId: string;
+    victimId: string;
+    cardId?: string; // Optional: ID of the card being stolen
+  };
+}
+
+export type PlayerAction = 
+  | { type: 'DRAW_CARD' }
+  | { type: 'PLAY_CARDS', cardIds: string[], targetId?: string, requestedCardType?: CardType }
+  | { type: 'DEFUSE', insertIndex: number };
