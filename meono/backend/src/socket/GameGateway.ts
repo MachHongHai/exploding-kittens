@@ -118,6 +118,14 @@ export class GameGateway {
       }
     } else if (action.type === 'PLAY_CARDS') {
       actionResult = this.game.playCards(playerId, action.cardIds, action.targetId, action.requestedCardType);
+    } else if (action.type === 'STEAL_CARD') {
+      const success = this.game.stealCard(playerId, action.victimId, action.cardIndex);
+      actionResult = { success, message: success ? '' : 'Failed to steal card' };
+    } else if (action.type === 'GIVE_CARD') {
+      const success = this.game.giveCard(playerId, action.requesterId, action.cardId);
+      actionResult = { success, message: success ? '' : 'Failed to give card' };
+    } else if (action.type === 'CONFIRM_FUTURE') {
+      this.game.clearFuture(playerId);
     } else if (action.type === 'DEFUSE') {
       const success = this.game.defuseKitten(playerId, action.insertIndex);
       if (success) {
@@ -143,8 +151,8 @@ export class GameGateway {
 
     const requiresDefuse = this.game.waitingForDefuse === currentPlayer.id;
 
-    // Simulate thinking delay
-    const delay = Math.random() * 1500 + 1000; // 1.5-2.5 seconds
+    // Increased thinking delay to 5 seconds for a more relaxed pace
+    const delay = 5000; 
     setTimeout(async () => {
       // Re-verify it's still their turn and the game is active
       const activePlayer = this.game.getCurrentPlayer();
@@ -155,7 +163,7 @@ export class GameGateway {
         await this.processAction(activePlayer.id, action);
       } catch (error) {
         console.error("[Bot Error]", error);
-        // Fallback to drawing if bot errors out, unless they must defuse
+        // Fallback
         if (requiresDefuse) {
           await this.processAction(activePlayer.id, { type: 'DEFUSE', insertIndex: 0 });
         } else {

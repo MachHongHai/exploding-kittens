@@ -16,23 +16,61 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
   const [showGuessModal, setShowGuessModal] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
+  const [isShuffling, setIsShuffling] = useState(false);
   
+  // Watch for shuffle action
+  useEffect(() => {
+    if (gameState.lastAction?.includes("played Shuffle")) {
+      setIsShuffling(true);
+      const timer = setTimeout(() => setIsShuffling(false), 2000);
+      return () => clearTimeout(timer);
+    }
+  }, [gameState.lastAction]);
+
   const myPlayer = gameState.players.find(p => p.id === socketId);
   const opponents = gameState.players.filter(p => p.id !== socketId);
   
   const isMyTurn = gameState.currentPlayerId === socketId && gameState.status === 'PLAYING';
-  const isExploding = myPlayer?.hand?.some(c => c.type === CardType.EXPLODING_KITTEN);
+  const isExploding = gameState.waitingForDefuse === socketId;
   const hasDefuse = myPlayer?.hand?.some(c => c.type === CardType.DEFUSE);
 
-  // Theft animation logic
+  // Future logic
+  const isSeeingFuture = !!gameState.futureCards;
+
+  // Stealing logic
+  const isStealer = gameState.waitingForSteal?.stealerId === socketId;
+  const victimId = gameState.waitingForSteal?.victimId;
+  const victim = gameState.players.find(p => p.id === victimId);
+
+  // Favor logic
+  const isFavorRequester = gameState.waitingForFavor?.requesterId === socketId;
+  const isFavorVictim = gameState.waitingForFavor?.victimId === socketId;
+  const favorRequester = gameState.players.find(p => p.id === gameState.waitingForFavor?.requesterId);
+  const favorVictim = gameState.players.find(p => p.id === gameState.waitingForFavor?.victimId);
+
+  // Theft animation logic (for when I'M being stolen from)
   const isBeingStolenFrom = gameState.lastTheft?.victimId === socketId;
   const stolenCardId = gameState.lastTheft?.cardId;
 
   const toggleCardSelection = (cardId: string) => {
-    if (!isMyTurn || isExploding) return;
+    if (!isMyTurn || isExploding || isStealer || isSeeingFuture || isFavorVictim) return;
     setSelectedCardIds(prev => 
       prev.includes(cardId) ? prev.filter(id => id !== cardId) : [...prev, cardId]
     );
+  };
+
+  const handleStealPick = (cardIndex: number) => {
+    if (!isStealer || !victimId) return;
+    onAction({ type: 'STEAL_CARD', victimId, cardIndex });
+  };
+
+  const handleGiveCard = (cardId: string) => {
+    if (!isFavorVictim || !gameState.waitingForFavor) return;
+    onAction({ type: 'GIVE_CARD', requesterId: gameState.waitingForFavor.requesterId, cardId });
+  };
+
+  const handleConfirmFuture = () => {
+    onAction({ type: 'CONFIRM_FUTURE' });
   };
 
   const handlePlayCombo = (requestedCardType?: CardType) => {
@@ -208,7 +246,13 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
           <div className="flex flex-row items-center gap-8 sm:gap-16 pointer-events-auto">
             {/* Draw Pile */}
             <div className="flex flex-col items-center">
-              <button 
+              <motion.button 
+                animate={isShuffling ? { 
+                  x: [0, -10, 10, -10, 10, 0],
+                  rotate: [0, -5, 5, -5, 5, 0],
+                  scale: [1, 1.1, 1]
+                } : {}}
+                transition={{ duration: 0.5, repeat: isShuffling ? Infinity : 0 }}
                 onClick={() => isMyTurn && !isExploding && onAction({ type: 'DRAW_CARD' })}
                 disabled={!isMyTurn || isExploding}
                 className="relative group transition-all duration-500"
@@ -219,7 +263,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
                      <span className="font-black text-xl text-white">{gameState.drawPileCount}</span>
                    </div>
                 </div>
-              </button>
+              </motion.button>
               <span className="mt-4 font-black tracking-widest text-slate-600 uppercase text-[9px]">Draw</span>
             </div>
 
@@ -251,6 +295,41 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
           </div>
         </div>
       </div>
+
+      {/* See The Future Overlay */}
+      {isSeeingFuture && gameState.futureCards && (
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="absolute inset-0 bg-black/80 backdrop-blur-3xl z-[60] flex flex-col items-center justify-center p-8">
+            <motion.h2 initial={{ y: -20 }} animate={{ y: 0 }} className="text-4xl font-black text-pink-500 mb-4 uppercase tracking-tighter italic">
+              Seeing the Future
+            </motion.h2>
+            <p className="text-slate-400 mb-16 font-bold uppercase tracking-[0.3em] text-xs text-center">Top 3 cards of the deck (Left to Right)</p>
+            
+            <div className="flex justify-center gap-8 mb-20">
+               {gameState.futureCards.map((card, i) => (
+                 <motion.div 
+                    key={card.id} 
+                    initial={{ y: 100, opacity: 0, rotate: -20 }}
+                    animate={{ y: 0, opacity: 1, rotate: 0 }}
+                    transition={{ delay: i * 0.2, type: "spring" }}
+                 >
+                    <CardView card={card} disabled className="shadow-[0_0_50px_rgba(236,72,153,0.3)] border-pink-500/30" />
+                    <div className="mt-4 text-center">
+                       <span className="text-[10px] font-black text-pink-500 uppercase tracking-widest bg-pink-500/10 px-3 py-1 rounded-full border border-pink-500/20">
+                         Pos {i + 1}
+                       </span>
+                    </div>
+                 </motion.div>
+               ))}
+            </div>
+
+            <button 
+              onClick={handleConfirmFuture}
+              className="px-12 py-4 rounded-full bg-white text-black font-black uppercase tracking-[0.2em] hover:bg-pink-500 hover:text-white transition-all duration-500 shadow-2xl scale-110 active:scale-95"
+            >
+              Put Them Back
+            </button>
+        </motion.div>
+      )}
 
       {/* Explosions & Alerts */}
       {isExploding && isMyTurn && (
@@ -284,6 +363,32 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
                    </motion.div>
                  )
                })}
+            </div>
+        </motion.div>
+      )}
+
+      {/* Interactive Steal Overlay (When I AM stealing) */}
+      {isStealer && victim && (
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="absolute inset-0 bg-black/80 backdrop-blur-3xl z-40 flex flex-col items-center justify-center p-8">
+            <motion.h2 initial={{ y: -20 }} animate={{ y: 0 }} className="text-4xl font-black text-white mb-4 uppercase tracking-tighter italic">
+              Stealing from {victim.name}
+            </motion.h2>
+            <p className="text-slate-400 mb-16 font-bold uppercase tracking-[0.3em] text-xs">Pick a card from their hand</p>
+            
+            <div className="flex flex-wrap justify-center -space-x-16 sm:-space-x-24 hover:space-x-4 transition-all duration-500">
+               {Array.from({ length: victim.handCount }).map((_, i) => (
+                 <motion.div 
+                    key={i} 
+                    initial={{ y: 50, opacity: 0 }}
+                    animate={{ y: 0, opacity: 1 }}
+                    transition={{ delay: i * 0.05 }}
+                    whileHover={{ y: -30, scale: 1.1, zIndex: 100 }}
+                    className="relative"
+                    onClick={() => handleStealPick(i)}
+                 >
+                    <CardView className="cursor-pointer border-orange-500/30 hover:border-orange-500 shadow-2xl" />
+                 </motion.div>
+               ))}
             </div>
         </motion.div>
       )}
@@ -354,9 +459,9 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
                       <CardView 
                         card={card} 
                         layoutId={card.id}
-                        onClick={() => toggleCardSelection(card.id)}
-                        disabled={!isMyTurn || isExploding}
-                        className={isSelected ? 'ring-2 ring-orange-500 shadow-[0_0_40px_rgba(249,115,22,0.5)]' : ''}
+                        onClick={() => isFavorVictim ? handleGiveCard(card.id) : toggleCardSelection(card.id)}
+                        disabled={(!isMyTurn && !isFavorVictim) || isExploding}
+                        className={`${isSelected ? 'ring-2 ring-orange-500 shadow-[0_0_40px_rgba(249,115,22,0.5)]' : ''} ${isFavorVictim ? 'ring-2 ring-purple-500 shadow-[0_0_20px_rgba(168,85,247,0.4)] animate-pulse' : ''}`}
                       />
                     </motion.div>
                   );

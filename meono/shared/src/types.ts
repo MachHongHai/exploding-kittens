@@ -43,14 +43,27 @@ export interface GameState {
   winner: string | null;
   waitingForDefuse: string | null;
   bombCountdown?: number; 
+  waitingForSteal?: {
+    stealerId: string;
+    victimId: string;
+    count: number;
+  };
+  waitingForFavor?: {
+    requesterId: string;
+    victimId: string;
+  };
   lastTheft?: {
     stealerId: string;
     victimId: string;
-    cardId?: string; // Optional: ID of the card being stolen
+    cardId?: string; 
   };
+  futureCards?: Card[]; 
 }
 
 export type PlayerAction = 
   | { type: 'DRAW_CARD' }
   | { type: 'PLAY_CARDS', cardIds: string[], targetId?: string, requestedCardType?: CardType }
+  | { type: 'STEAL_CARD', victimId: string, cardIndex: number }
+  | { type: 'GIVE_CARD', requesterId: string, cardId: string }
+  | { type: 'CONFIRM_FUTURE' }
   | { type: 'DEFUSE', insertIndex: number };

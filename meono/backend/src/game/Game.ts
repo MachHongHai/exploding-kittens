@@ -11,7 +11,10 @@ export class Game {
   public lastAction: string | null = null;
   public winner: string | null = null;
   public waitingForDefuse: string | null = null;
+  public waitingForSteal: { stealerId: string; victimId: string; count: number } | null = null;
+  public waitingForFavor: { requesterId: string; victimId: string } | null = null;
   public lastTheft: { stealerId: string; victimId: string; cardId?: string } | null = null;
+  public playerSeeingFuture: string | null = null;
 
   constructor(id: string) {
     this.id = id;
@@ -27,10 +30,10 @@ export class Game {
     this.status = 'PLAYING';
     this.currentPlayerIndex = 0;
 
-    // 1. Create base deck (46 cards)
+    // 1. Create base deck
     this.drawPile = createDeck(this.players.length);
 
-    // 2. Deal 1 Defuse and 4 normal cards to each player
+    // 2. Deal 1 Defuse and 7 normal cards to each player
     this.players.forEach(player => {
       player.hand = [];
       player.turnsToPlay = 1;
@@ -83,15 +86,23 @@ export class Game {
 
   nextTurn() {
     let nextIndex = (this.currentPlayerIndex + 1) % this.players.length;
-    this.lastTheft = null; // Clear theft animation on turn change
+    this.lastTheft = null; 
+    this.waitingForSteal = null;
+    this.waitingForFavor = null;
+    this.playerSeeingFuture = null;
     
-    // Find next active player
     while (this.players[nextIndex].isEliminated) {
       nextIndex = (nextIndex + 1) % this.players.length;
     }
     
     this.currentPlayerIndex = nextIndex;
-    this.getCurrentPlayer().turnsToPlay = 1; // Reset turns to play unless modified by attack
+    this.getCurrentPlayer().turnsToPlay = 1; 
+  }
+
+  clearFuture(playerId: string) {
+    if (this.playerSeeingFuture === playerId) {
+      this.playerSeeingFuture = null;
+    }
   }
 
   playCards(playerId: string, cardIds: string[], targetId?: string, requestedCardType?: CardType): { success: boolean; message?: string } {
@@ -100,11 +111,10 @@ export class Game {
     const player = this.getCurrentPlayer();
     if (player.id !== playerId) return { success: false, message: "Not your turn" };
 
-    this.lastTheft = null; // Reset theft state for any new action
+    this.lastTheft = null; 
 
     if (!cardIds || cardIds.length === 0) return { success: false, message: "No cards selected" };
 
-    // Validate ownership
     const cards: Card[] = [];
     for (const cid of cardIds) {
       const c = player.hand.find(card => card.id === cid);
@@ -115,12 +125,9 @@ export class Game {
     const firstType = cards[0].type;
     const isSameType = cards.every(c => c.type === firstType);
 
-    // 1 CARD COMBO
     if (cards.length === 1) {
       const card = cards[0];
-      if (card.type.startsWith('CAT_CARD')) {
-        return { success: false, message: "Cat cards must be played in pairs!" };
-      }
+      if (card.type.startsWith('CAT_CARD')) return { success: false, message: "Cat cards must be played in pairs!" };
       
       player.removeCard(card.id);
       this.discardPile.push(card);
@@ -144,22 +151,16 @@ export class Game {
           break;
         case CardType.SEE_THE_FUTURE:
           this.lastAction = `${player.name} played See The Future!`;
+          if (!player.isBot) {
+            this.playerSeeingFuture = player.id;
+          }
           break;
         case CardType.FAVOR:
-          if (!targetId) {
-            // Restore card if failed
-            player.drawCard(this.discardPile.pop()!);
-            return { success: false, message: "Favor requires a target" };
-          }
+          if (!targetId) return { success: false, message: "Favor requires a target" };
           const target = this.players.find(p => p.id === targetId);
           if (target && target.handCount > 0) {
-            const randomCardIndex = Math.floor(Math.random() * target.handCount);
-            const stolenCard = target.hand.splice(randomCardIndex, 1)[0];
-            player.drawCard(stolenCard);
-            this.lastAction = `${player.name} played Favor on ${target.name} and stole a card.`;
-            this.lastTheft = { stealerId: player.id, victimId: target.id, cardId: stolenCard.id };
-          } else {
-            this.lastAction = `${player.name} played Favor on ${target?.name}, but they had no cards.`;
+            this.waitingForFavor = { requesterId: player.id, victimId: target.id };
+            this.lastAction = `${player.name} played Favor on ${target.name}.`;
           }
           break;
         default:
@@ -169,168 +170,164 @@ export class Game {
       return { success: true };
     }
 
-    // 2 CARD COMBO (PAIR)
     if (cards.length === 2) {
-      if (!isSameType) return { success: false, message: "Cards must be the same type to play a pair" };
-      if (!targetId) return { success: false, message: "A pair requires a target player to steal from" };
-      
+      if (!isSameType) return { success: false, message: "Must be same type" };
+      if (!targetId) return { success: false, message: "Requires target" };
       const target = this.players.find(p => p.id === targetId);
-      if (!target || target.handCount === 0) return { success: false, message: "Target is invalid or has no cards" };
+      if (!target || target.handCount === 0) return { success: false, message: "Invalid target" };
 
-      // Remove cards and apply effect
-      cards.forEach(c => {
-        player.removeCard(c.id);
-        this.discardPile.push(c);
-      });
+      cards.forEach(c => player.removeCard(c.id) && this.discardPile.push(c));
 
-      const randomCardIndex = Math.floor(Math.random() * target.handCount);
-      const stolenCard = target.hand.splice(randomCardIndex, 1)[0];
-      player.drawCard(stolenCard);
-      this.lastAction = `${player.name} played a Pair and blindly stole a card from ${target.name}.`;
-      this.lastTheft = { stealerId: player.id, victimId: target.id, cardId: stolenCard.id };
-      return { success: true };
-    }
-
-    // 3 CARD COMBO (THREE OF A KIND)
-    if (cards.length === 3) {
-      if (!isSameType) return { success: false, message: "Cards must be the same type for 3 of a kind" };
-      if (!targetId) return { success: false, message: "Requires a target player" };
-      if (!requestedCardType) return { success: false, message: "Requires a requested card type" };
-
-      const target = this.players.find(p => p.id === targetId);
-      if (!target || target.handCount === 0) return { success: false, message: "Target is invalid or has no cards" };
-
-      const targetCardIndex = target.hand.findIndex(c => c.type === requestedCardType);
-      
-      // If target does NOT have the card, return false so the player can guess again
-      if (targetCardIndex === -1) {
-        return { success: false, message: `${target.name} does not have a ${requestedCardType}. Try asking for a different card!` };
+      if (!player.isBot) {
+        this.waitingForSteal = { stealerId: player.id, victimId: target.id, count: 1 };
+        this.lastAction = `${player.name} played a Pair on ${target.name}.`;
+      } else {
+        const stolenCard = target.hand.splice(Math.floor(Math.random() * target.handCount), 1)[0];
+        player.drawCard(stolenCard);
+        this.lastAction = `${player.name} played a Pair and stole from ${target.name}.`;
+        this.lastTheft = { stealerId: player.id, victimId: target.id, cardId: stolenCard.id };
       }
+      return { success: true };
+    }
 
-      // They guessed right! Remove cards and apply effect.
-      cards.forEach(c => {
-        player.removeCard(c.id);
-        this.discardPile.push(c);
-      });
+    if (cards.length === 3) {
+      if (!isSameType || !targetId || !requestedCardType) return { success: false, message: "Invalid 3-of-a-kind play" };
+      const target = this.players.find(p => p.id === targetId);
+      if (!target || target.handCount === 0) return { success: false, message: "Invalid target" };
 
-      const stolenCard = target.hand.splice(targetCardIndex, 1)[0];
+      const idx = target.hand.findIndex(c => c.type === requestedCardType);
+      if (idx === -1) return { success: false, message: `${target.name} has no ${requestedCardType}!` };
+
+      cards.forEach(c => player.removeCard(c.id) && this.discardPile.push(c));
+      const stolenCard = target.hand.splice(idx, 1)[0];
       player.drawCard(stolenCard);
-      this.lastAction = `${player.name} played 3 of a Kind and successfully stole a ${requestedCardType} from ${target.name}.`;
+      this.lastAction = `${player.name} successfully guessed ${requestedCardType} from ${target.name}!`;
       this.lastTheft = { stealerId: player.id, victimId: target.id, cardId: stolenCard.id };
       return { success: true };
     }
 
-    return { success: false, message: "Invalid combination. Only 1, 2, or 3 cards are allowed." };
+    return { success: false, message: "Invalid play" };
+  }
+
+  stealCard(stealerId: string, victimId: string, cardIndex: number): boolean {
+    if (!this.waitingForSteal || this.waitingForSteal.stealerId !== stealerId) return false;
+    const stealer = this.players.find(p => p.id === stealerId);
+    const victim = this.players.find(p => p.id === victimId);
+    if (!stealer || !victim || cardIndex < 0 || cardIndex >= victim.hand.length) return false;
+    const card = victim.hand.splice(cardIndex, 1)[0];
+    stealer.drawCard(card);
+    this.lastAction = `${stealer.name} picked a card from ${victim.name}.`;
+    this.lastTheft = { stealerId, victimId, cardId: card.id };
+    this.waitingForSteal = null;
+    return true;
+  }
+
+  giveCard(victimId: string, requesterId: string, cardId: string): boolean {
+    if (!this.waitingForFavor || this.waitingForFavor.victimId !== victimId || this.waitingForFavor.requesterId !== requesterId) return false;
+    
+    const victim = this.players.find(p => p.id === victimId);
+    const requester = this.players.find(p => p.id === requesterId);
+    
+    if (!victim || !requester) return false;
+    
+    const card = victim.removeCard(cardId);
+    if (!card) return false;
+    
+    requester.drawCard(card);
+    this.lastAction = `${victim.name} gave a card to ${requester.name} (Favor).`;
+    this.lastTheft = { stealerId: requesterId, victimId, cardId: card.id };
+    this.waitingForFavor = null;
+    
+    return true;
   }
 
   drawPhase(playerId: string): 'SAFE' | 'EXPLODED' | 'DEFUSE_REQUIRED' {
-    if (this.status !== 'PLAYING') return 'SAFE';
-    if (this.waitingForDefuse) return 'SAFE';
+    if (this.status !== 'PLAYING' || this.waitingForDefuse) return 'SAFE';
     const player = this.getCurrentPlayer();
     if (player.id !== playerId) return 'SAFE';
 
-    this.lastTheft = null; // Clear theft state on draw phase
+    this.lastTheft = null;
     const card = this.drawPile.pop();
-    if (!card) return 'SAFE'; // Deck empty edge case
+    if (!card) return 'SAFE';
 
     if (card.type === CardType.EXPLODING_KITTEN) {
       this.lastAction = `${player.name} drew an Exploding Kitten!`;
       if (player.hasDefuse()) {
         this.waitingForDefuse = player.id;
         return 'DEFUSE_REQUIRED';
-      } else {
-        this.eliminatePlayer(player.id);
-        return 'EXPLODED';
       }
-    } else {
-      player.drawCard(card);
-      this.lastAction = `${player.name} drew a card.`;
-      player.turnsToPlay -= 1;
-      
-      if (player.turnsToPlay <= 0) {
-        this.nextTurn();
-      }
-      return 'SAFE';
+      this.eliminatePlayer(player.id);
+      return 'EXPLODED';
     }
+    player.drawCard(card);
+    this.lastAction = `${player.name} drew a card.`;
+    if (--player.turnsToPlay <= 0) this.nextTurn();
+    return 'SAFE';
   }
 
   defuseKitten(playerId: string, insertIndex: number): boolean {
-    const player = this.getCurrentPlayer();
-    if (player.id !== playerId || this.waitingForDefuse !== playerId) return false;
+    const player = this.players.find(p => p.id === playerId);
+    if (!player || this.waitingForDefuse !== playerId) return false;
 
-    const defuseCardId = player.getDefuseCardId();
-    if (!defuseCardId) return false;
+    const defuseId = player.getDefuseCardId();
+    if (!defuseId) return false;
 
-    const defuseCard = player.removeCard(defuseCardId);
-    if (defuseCard) {
-      this.discardPile.push(defuseCard);
-    }
+    const defuseCard = player.removeCard(defuseId);
+    if (defuseCard) this.discardPile.push(defuseCard);
 
-    // Insert kitten back
-    const safeIndex = Math.max(0, Math.min(insertIndex, this.drawPile.length));
-    // Array splice to insert at specific index. Note: end of array is top of deck.
-    // If user wants to put it on top (next draw), index should be this.drawPile.length
-    this.drawPile.splice(this.drawPile.length - safeIndex, 0, {
+    const pos = Math.max(0, Math.min(insertIndex, this.drawPile.length));
+    this.drawPile.splice(this.drawPile.length - pos, 0, {
       id: generateCardId(),
       type: CardType.EXPLODING_KITTEN,
       name: 'Exploding Kitten',
-      description: 'You explode and are out of the game!'
+      description: 'Boom!'
     });
 
     this.lastAction = `${player.name} defused the kitten!`;
     this.waitingForDefuse = null;
-    
-    player.turnsToPlay -= 1;
-    if (player.turnsToPlay <= 0) {
-      this.nextTurn();
-    }
+    if (--player.turnsToPlay <= 0) this.nextTurn();
     return true;
   }
 
   eliminatePlayer(playerId: string) {
-    const player = this.players.find(p => p.id === playerId);
-    if (!player) return;
-    
-    player.isEliminated = true;
-    this.discardPile.push(...player.hand);
-    player.hand = [];
+    const p = this.players.find(p => p.id === playerId);
+    if (!p) return;
+    p.isEliminated = true;
+    this.discardPile.push(...p.hand);
+    p.hand = [];
     this.waitingForDefuse = null;
-    
-    this.lastAction = `${player.name} exploded and is out of the game!`;
-
-    const alivePlayers = this.players.filter(p => !p.isEliminated);
-    if (alivePlayers.length === 1) {
+    this.lastAction = `${p.name} exploded!`;
+    const alive = this.players.filter(p => !p.isEliminated);
+    if (alive.length === 1) {
       this.status = 'GAME_OVER';
-      this.winner = alivePlayers[0].name;
-      this.lastAction = `${alivePlayers[0].name} wins the game!`;
+      this.winner = alive[0].name;
     } else {
       this.nextTurn();
     }
   }
 
-  // Get state tailored for a specific player (hiding other players' hands and the draw pile)
   getStateForPlayer(playerId: string): GameState {
     return {
       status: this.status,
       currentPlayerId: this.status === 'PLAYING' ? this.getCurrentPlayer()?.id : null,
       drawPileCount: this.drawPile.length,
-      discardPile: this.discardPile.slice(-5), // Only send top 5 to save bandwidth
+      discardPile: this.discardPile.slice(-10),
       lastAction: this.lastAction,
       winner: this.winner,
       waitingForDefuse: this.waitingForDefuse,
+      waitingForSteal: this.waitingForSteal || undefined,
+      waitingForFavor: this.waitingForFavor || undefined,
       lastTheft: this.lastTheft || undefined,
-      players: this.players.map(p => {
-        const isMe = p.id === playerId;
-        return {
-          id: p.id,
-          name: p.name,
-          handCount: p.handCount,
-          isBot: p.isBot,
-          turnsToPlay: p.turnsToPlay,
-          isEliminated: p.isEliminated,
-          hand: isMe ? p.hand : undefined, // Only send hand if it's the requesting player
-        };
-      })
+      futureCards: this.playerSeeingFuture === playerId ? this.drawPile.slice(-3).reverse() : undefined,
+      players: this.players.map(p => ({
+        id: p.id,
+        name: p.name,
+        handCount: p.handCount,
+        isBot: p.isBot,
+        turnsToPlay: p.turnsToPlay,
+        isEliminated: p.isEliminated,
+        hand: p.id === playerId ? p.hand : undefined
+      }))
     };
   }
 }

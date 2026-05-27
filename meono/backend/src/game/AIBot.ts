@@ -13,6 +13,12 @@ export class AIBotController {
     const player = this.game.players.find(p => p.id === botId);
     if (!player) throw new Error("Bot player not found");
 
+    // NEW: Handle being targeted by a Favor
+    if (this.game.waitingForFavor?.victimId === botId) {
+      const weakestCardId = this.chooseWeakestCard(player.hand);
+      return { type: 'GIVE_CARD', requesterId: this.game.waitingForFavor.requesterId, cardId: weakestCardId };
+    }
+
     if (difficulty === 'HARD') {
       return this.takeHardTurn(botId, requiresDefuse);
     } else if (difficulty === 'MEDIUM') {
@@ -20,6 +26,31 @@ export class AIBotController {
     } else {
       return this.takeEasyTurn(botId, requiresDefuse);
     }
+  }
+
+  private chooseWeakestCard(hand: any[]): string {
+    // 1. Priority 1: Cat Cards (especially those without a pair)
+    const counts: Record<string, number> = {};
+    hand.forEach(c => counts[c.type] = (counts[c.type] || 0) + 1);
+    
+    const loneCat = hand.find(c => c.type.startsWith('CAT_CARD') && counts[c.type] === 1);
+    if (loneCat) return loneCat.id;
+
+    const anyCat = hand.find(c => c.type.startsWith('CAT_CARD'));
+    if (anyCat) return anyCat.id;
+
+    // 2. Priority 2: Common action cards
+    const utility = hand.find(c => c.type === CardType.SHUFFLE || c.type === CardType.SEE_THE_FUTURE);
+    if (utility) return utility.id;
+
+    const common = hand.find(c => c.type === CardType.FAVOR || c.type === CardType.SKIP);
+    if (common) return common.id;
+
+    // 3. Fallback: Anything that isn't Defuse
+    const fallback = hand.find(c => c.type !== CardType.DEFUSE);
+    if (fallback) return fallback.id;
+
+    return hand[0].id;
   }
 
   private takeEasyTurn(botId: string, requiresDefuse: boolean): PlayerAction {
@@ -63,6 +94,7 @@ export class AIBotController {
         return { type: 'DRAW_CARD' };
       }
 
+      // For SEE_THE_FUTURE or SHUFFLE, Easy bot just plays them immediately
       return { type: 'PLAY_CARDS', cardIds: [cardToPlay.id], targetId };
     }
 
