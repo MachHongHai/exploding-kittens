@@ -1,5 +1,5 @@
 import { Game } from './Game';
-import { askGeminiForMove, BotDecision } from '../services/gemini';
+import { askAIForMove, BotDecision } from '../services/ai-service.js';
 import { CardType, PlayerAction } from '../../../shared/src/types';
 
 export class AIBotController {
@@ -151,7 +151,7 @@ export class AIBotController {
   private async takeHardTurn(botId: string, requiresDefuse: boolean): Promise<PlayerAction> {
     const player = this.game.players.find(p => p.id === botId)!;
     
-    // Build context for Gemini
+    // Build context for OpenAI
     const opponents = this.game.players.filter(p => p.id !== botId && !p.isEliminated).map(p => ({
       id: p.id,
       name: p.name,
@@ -167,22 +167,22 @@ export class AIBotController {
     - Opponents: ${JSON.stringify(opponents)}
     `;
 
-    const decision = await askGeminiForMove(gameStateDesc, player.hand);
+    const decision = await askAIForMove(gameStateDesc, player.hand);
 
     if (decision) {
       if (decision.action === 'DEFUSE' && requiresDefuse) {
          return { type: 'DEFUSE', insertIndex: decision.insertIndex || 0 };
       }
-      if (decision.action === 'PLAY_CARD' && decision.cardId) {
-         return { type: 'PLAY_CARDS', cardIds: [decision.cardId], targetId: decision.targetId };
+      if (decision.action === 'PLAY_CARDS' && decision.cardIds && decision.cardIds.length > 0) {
+         return { type: 'PLAY_CARDS', cardIds: decision.cardIds, targetId: decision.targetId, requestedCardType: decision.requestedCardType };
       }
       if (decision.action === 'DRAW_CARD') {
          return { type: 'DRAW_CARD' };
       }
     }
 
-    // Fallback if Gemini fails or returns invalid action
-    console.log("[AIBot] Gemini failed or timed out, falling back to Medium logic.");
+    // Fallback if AI Service fails or returns invalid action
+    console.log("[AIBot] AI Service failed or timed out, falling back to Medium logic.");
     return this.takeMediumTurn(botId, requiresDefuse);
   }
 }
