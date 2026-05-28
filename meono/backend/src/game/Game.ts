@@ -148,9 +148,12 @@ export class Game {
         case CardType.SHUFFLE:
           this.lastAction = `${player.name} played Shuffle!`;
           this.drawPile = shuffleDeck(this.drawPile);
+          this.players.forEach(p => p.knownDeckTop = []);
           break;
         case CardType.SEE_THE_FUTURE:
           this.lastAction = `${player.name} played See The Future!`;
+          const top3 = this.drawPile.slice(-3).reverse();
+          player.knownDeckTop = top3.map(c => ({ cardType: c.type, cardName: c.name }));
           if (!player.isBot) {
             this.playerSeeingFuture = player.id;
           }
@@ -250,6 +253,13 @@ export class Game {
     const card = this.drawPile.pop();
     if (!card) return 'SAFE';
 
+    // Shift known top cards for all players
+    this.players.forEach(p => {
+      if (p.knownDeckTop.length > 0) {
+        p.knownDeckTop.shift();
+      }
+    });
+
     if (card.type === CardType.EXPLODING_KITTEN) {
       this.lastAction = `${player.name} drew an Exploding Kitten!`;
       if (player.hasDefuse()) {
@@ -281,6 +291,16 @@ export class Game {
       type: CardType.EXPLODING_KITTEN,
       name: 'Exploding Kitten',
       description: 'Boom!'
+    });
+
+    // The defusing player remembers exactly where the bomb was inserted
+    player.knownDeckTop.splice(pos, 0, { cardType: CardType.EXPLODING_KITTEN, cardName: 'Exploding Kitten' });
+
+    // Invalidate other players' memories since cards shifted
+    this.players.forEach(p => {
+      if (p.id !== player.id) {
+        p.knownDeckTop = [];
+      }
     });
 
     this.lastAction = `${player.name} defused the kitten!`;

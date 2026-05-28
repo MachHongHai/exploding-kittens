@@ -105,10 +105,41 @@ export class AIBotController {
     const player = this.game.players.find(p => p.id === botId)!;
 
     if (requiresDefuse) {
-      return { type: 'DEFUSE', insertIndex: 1 };
+      // Find the next active player
+      let nextIndex = (this.game.currentPlayerIndex + 1) % this.game.players.length;
+      while (this.game.players[nextIndex].isEliminated) {
+        nextIndex = (nextIndex + 1) % this.game.players.length;
+      }
+      const nextPlayer = this.game.players[nextIndex];
+      
+      // Heuristic: If next player has no Defuse card, place bomb on top (index 0) to eliminate them.
+      // Otherwise, place it randomly between index 1 and 3 (or deck size) to buy time.
+      const hasDefuse = nextPlayer.hasDefuse();
+      const insertIndex = !hasDefuse ? 0 : Math.floor(Math.random() * Math.min(3, this.game.drawPile.length + 1));
+      console.log(`[AIBot - Medium] Bot ${player.name} is defusing. Next player has defuse? ${hasDefuse}. Placing bomb at index ${insertIndex}.`);
+      return { type: 'DEFUSE', insertIndex };
     }
 
-    // 1. Defensive: If being attacked, MUST play Skip or Attack
+    // 1. Memory Defense: If a bomb is known to be in the range of cards we must draw
+    const bombInRangeIndex = player.knownDeckTop.findIndex((c: any, idx: number) => 
+      c.cardType === CardType.EXPLODING_KITTEN && idx < player.turnsToPlay
+    );
+    
+    if (bombInRangeIndex !== -1) {
+      console.log(`[AIBot - Medium] Bot ${player.name} knows a bomb is coming at draw index ${bombInRangeIndex}! Trying to play defense...`);
+      // Play Skip or Attack to avoid drawing
+      const skipOrAttack = player.hand.find(c => c.type === CardType.SKIP || c.type === CardType.ATTACK);
+      if (skipOrAttack) {
+        return { type: 'PLAY_CARDS', cardIds: [skipOrAttack.id] };
+      }
+      // Play Shuffle to randomize the bomb's position
+      const shuffleCard = player.hand.find(c => c.type === CardType.SHUFFLE);
+      if (shuffleCard) {
+        return { type: 'PLAY_CARDS', cardIds: [shuffleCard.id] };
+      }
+    }
+
+    // 2. Defensive check if being attacked (but no known bomb is immediate)
     if (player.turnsToPlay > 1) {
       const defenseCard = player.hand.find(c => c.type === CardType.SKIP || c.type === CardType.ATTACK);
       if (defenseCard) {
@@ -116,13 +147,22 @@ export class AIBotController {
       }
     }
 
-    // 2. High Priority: See The Future / Shuffle when deck is low or randomly
-    const utilityCard = player.hand.find(c => c.type === CardType.SEE_THE_FUTURE || c.type === CardType.SHUFFLE);
-    if (utilityCard && (this.game.drawPile.length <= 10 || Math.random() > 0.8)) {
-      return { type: 'PLAY_CARDS', cardIds: [utilityCard.id] };
+    // 3. Play See The Future or Shuffle under appropriate conditions
+    const seeFutureCard = player.hand.find(c => c.type === CardType.SEE_THE_FUTURE);
+    if (seeFutureCard && (this.game.drawPile.length <= 10 || Math.random() > 0.7)) {
+      return { type: 'PLAY_CARDS', cardIds: [seeFutureCard.id] };
     }
 
-    // 3. Strategic: Play Favor to steal
+    const shuffleCard = player.hand.find(c => c.type === CardType.SHUFFLE);
+    if (shuffleCard) {
+      // Don't shuffle if we know the top card is safe!
+      const topCardIsSafe = player.knownDeckTop.length > 0 && player.knownDeckTop[0].cardType !== CardType.EXPLODING_KITTEN;
+      if (!topCardIsSafe && (this.game.drawPile.length <= 10 || Math.random() > 0.8)) {
+        return { type: 'PLAY_CARDS', cardIds: [shuffleCard.id] };
+      }
+    }
+
+    // 4. Strategic Favor: Play Favor to steal
     const favorCard = player.hand.find(c => c.type === CardType.FAVOR);
     if (favorCard && Math.random() > 0.6) {
       const opponents = this.game.players.filter(p => p.id !== botId && !p.isEliminated && p.handCount > 0);
@@ -130,7 +170,7 @@ export class AIBotController {
       if (targetId) return { type: 'PLAY_CARDS', cardIds: [favorCard.id], targetId };
     }
 
-    // 4. Combos: Check for pairs
+    // 5. Combos: Check for pairs
     const counts: Record<string, string[]> = {};
     player.hand.forEach(c => {
       if (!counts[c.type]) counts[c.type] = [];
@@ -151,19 +191,46 @@ export class AIBotController {
   private async takeHardTurn(botId: string, requiresDefuse: boolean): Promise<PlayerAction> {
     const player = this.game.players.find(p => p.id === botId)!;
     
-    // Build context for OpenAI
+    // OPTIMIZATION: If not forced to Defuse, and has no playable action cards or pairs, draw automatically to save quota
+    if (!requiresDefuse) {
+      const hasSinglePlayable = player.hand.some(c => 
+        c.type === CardType.ATTACK || 
+        c.type === CardType.SKIP || 
+        c.type === CardType.FAVOR || 
+        c.type === CardType.SHUFFLE || 
+        c.type === CardType.SEE_THE_FUTURE
+      );
+
+      const cardCounts: Record<string, number> = {};
+      player.hand.forEach(c => cardCounts[c.type] = (cardCounts[c.type] || 0) + 1);
+      const hasPairPlayable = Object.values(cardCounts).some(count => count >= 2);
+
+      if (!hasSinglePlayable && !hasPairPlayable) {
+        console.log(`[AIBot - Hard] Bot ${player.name} has no playable cards. Drawing automatically to save quota.`);
+        return { type: 'DRAW_CARD' };
+      }
+    }
+
+    // Build context for Gemini
     const opponents = this.game.players.filter(p => p.id !== botId && !p.isEliminated).map(p => ({
       id: p.id,
       name: p.name,
       handCount: p.handCount,
-      turnsToPlay: p.turnsToPlay
+      turnsToPlay: p.turnsToPlay,
+      hasDefuse: p.hasDefuse() // Tell Gemini if they have defuse (critical for placing bombs!)
     }));
+
+    const knownTop = player.knownDeckTop.length > 0
+      ? player.knownDeckTop.map((c: any, i: number) => `Position ${i} (0 is top/immediate draw): ${c.cardName}`).join('\n')
+      : 'None (Unknown cards)';
 
     const gameStateDesc = `
     - Draw pile size: ${this.game.drawPile.length}
     - Discard pile top card: ${this.game.discardPile.length > 0 ? this.game.discardPile[this.game.discardPile.length - 1].name : 'Empty'}
     - Your turns to play: ${player.turnsToPlay}
     - Requires Defuse right now?: ${requiresDefuse ? 'YES' : 'NO'}
+    - Cards you know at the top of the draw pile (from top to bottom):
+${knownTop}
     - Opponents: ${JSON.stringify(opponents)}
     `;
 
@@ -171,12 +238,15 @@ export class AIBotController {
 
     if (decision) {
       if (decision.action === 'DEFUSE' && requiresDefuse) {
-         return { type: 'DEFUSE', insertIndex: decision.insertIndex || 0 };
+         // pos represents how many cards from top to insert. 0 means on top (index 0).
+         const pos = decision.insertIndex !== undefined ? decision.insertIndex : 0;
+         console.log(`[AIBot - Hard] Bot ${player.name} decided to insert bomb at position ${pos}`);
+         return { type: 'DEFUSE', insertIndex: pos };
       }
       if (decision.action === 'PLAY_CARDS' && decision.cardIds && decision.cardIds.length > 0) {
          return { type: 'PLAY_CARDS', cardIds: decision.cardIds, targetId: decision.targetId, requestedCardType: decision.requestedCardType };
       }
-      if (decision.action === 'DRAW_CARD') {
+      if (decision.action === 'DRAW_CARD' && !requiresDefuse) {
          return { type: 'DRAW_CARD' };
       }
     }

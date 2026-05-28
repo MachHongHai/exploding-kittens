@@ -28,6 +28,16 @@ IMPORTANT RULES:
 - If you choose 'PLAY_CARDS', you must provide an array of exactly 'cardIds' from your hand.
 - If playing a FAVOR or a Pair (2 cards of same type), provide the 'targetId' of an opponent.
 
+TACTICAL INSIGHTS:
+- MEMORY OF TOP CARDS: Pay attention to the "Cards you know at the top of the draw pile" in the game state.
+- If you know an Exploding Kitten is coming up in the range of cards you are forced to draw (based on 'Your turns to play'), you MUST play a defense card like SKIP, ATTACK, or SHUFFLE immediately to avoid drawing it and exploding!
+- If you know the top card is safe, do NOT play SKIP, ATTACK, or SHUFFLE unless you have a strong tactical reason. Just DRAW_CARD to save your cards!
+- SHUFFLING: Only play SHUFFLE if you know a bomb is on top, or if you suspect there is a bomb and have no other way to skip drawing. Don't shuffle if you know the top card is a good/safe card.
+- DEFUSING: If 'Requires Defuse right now' is YES, choose 'action': 'DEFUSE'.
+  - Choose 'insertIndex' carefully (0 means top of the deck, 1 means 1 card below top, etc.).
+  - If the next player has no Defuse card, place the bomb at position 0 to eliminate them immediately!
+  - If you want to delay drawing, place it deeper (e.g., index 2 or 3).
+
 CURRENT GAME STATE:
 ${gameStateDescription}
 
