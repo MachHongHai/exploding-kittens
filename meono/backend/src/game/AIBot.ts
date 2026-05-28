@@ -351,34 +351,110 @@ ${historyDesc}
     if (!nopeCard) return null;
 
     const action = this.game.pendingAction;
+    const deckSize = this.game.drawPile.length;
+    const handSize = player.handCount;
+    const hasDefuse = player.hand.some(c => c.type === CardType.DEFUSE);
+    
+    // Check if bot knows the top card of the deck is a bomb
+    const isTopCardBomb = player.knownDeckTop.length > 0 && 
+                          player.knownDeckTop[0].cardType === CardType.EXPLODING_KITTEN;
 
-    // Critical guard: Do not Nope your own actions unless they are currently Noped by someone else (counter-Nope / Yup)
-    if (action.playerId === botId) {
-      if (action.nopeCount % 2 !== 0 && (difficulty === 'HARD' || difficulty === 'PLAY_WITH_GEMINI')) {
+    // Easy bots: simple 25% chance of noping if targeted, never counter-nope
+    if (difficulty === 'EASY') {
+      if (action.playerId !== botId && action.nopeCount === 0 && action.targetId === botId && Math.random() < 0.25) {
         return { type: 'PLAY_NOPE', cardId: nopeCard.id };
       }
       return null;
     }
 
-    // If the action is already noped, playing a Nope would counter-nope it (enabling it).
-    // We only want to Nope if the action is currently active/successful (nopeCount % 2 === 0).
-    if (action.nopeCount % 2 !== 0) {
+    // --- CASE 1: COUNTER-NOPING (YUP) to protect our own action ---
+    if (action.playerId === botId) {
+      // We only counter-nope if our action is currently noped (nopeCount is odd: 1, 3, etc.)
+      if (action.nopeCount % 2 === 0) return null;
+
+      const cardType = action.cards[0]?.type;
+
+      // 1. Never counter-nope Shuffle, See the Future, or Favor. Let them waste their Nope!
+      if (cardType === CardType.SHUFFLE || cardType === CardType.SEE_THE_FUTURE || cardType === CardType.FAVOR) {
+        console.log(`[AIBot - Nope] Bot ${player.name} chooses NOT to counter-nope low-value ${cardType}. Letting it fail.`);
+        return null;
+      }
+
+      // 2. Attack / Skip: Counter-nope only if we are in danger (bomb known at top or we have no Defuse card in late game)
+      if (cardType === CardType.ATTACK || cardType === CardType.SKIP) {
+        const inDanger = isTopCardBomb || (!hasDefuse && deckSize <= 8);
+        if (inDanger) {
+          console.log(`[AIBot - Nope] Bot ${player.name} counter-nopes to save itself from drawing (Action: ${cardType}).`);
+          return { type: 'PLAY_NOPE', cardId: nopeCard.id };
+        }
+        console.log(`[AIBot - Nope] Bot ${player.name} chooses not to waste Nope defending ${cardType} (Not in immediate danger).`);
+        return null;
+      }
+
+      // 3. Combos (Pairs / 3-of-a-kind): Counter-nope only if it's late game and we are targeting a Defuse card
+      if (action.actionType === '2-CARD' || action.actionType === '3-CARD') {
+        const targetPlayer = this.game.players.find(p => p.id === action.targetId);
+        const targetHasDefuse = targetPlayer?.hasDefuse();
+        if (deckSize <= 8 && !hasDefuse && targetHasDefuse) {
+          console.log(`[AIBot - Nope] Bot ${player.name} counter-nopes combo to steal Defuse from ${targetPlayer?.name}.`);
+          return { type: 'PLAY_NOPE', cardId: nopeCard.id };
+        }
+        return null;
+      }
+
       return null;
     }
 
-    const isTargeted = action.targetId === botId;
-    const isAttacked = action.cards[0]?.type === CardType.ATTACK;
+    // --- CASE 2: Noping an opponent's action ---
+    // We only Nope if the action is currently active/successful (nopeCount is even: 0, 2, etc.)
+    if (action.nopeCount % 2 !== 0) return null;
 
-    // Base logic: If attacked or targeted by steal/favor, Nope it!
-    if (isTargeted || isAttacked) {
-      if (Math.random() > 0.2) return { type: 'PLAY_NOPE', cardId: nopeCard.id };
+    const cardType = action.cards[0]?.type;
+    const isTargeted = action.targetId === botId;
+
+    // 1. Never Nope Shuffle or See the Future. It's a waste of a precious defensive card.
+    if (cardType === CardType.SHUFFLE || cardType === CardType.SEE_THE_FUTURE) {
+      return null;
     }
 
-    // Advanced logic (Hard/Gemini)
-    if (difficulty === 'HARD' || difficulty === 'PLAY_WITH_GEMINI') {
-      // If opponent plays See The Future or Shuffle, and we want to ruin it
-      if ((action.cards[0]?.type === CardType.SEE_THE_FUTURE || action.cards[0]?.type === CardType.SHUFFLE) && Math.random() > 0.7) {
-         return { type: 'PLAY_NOPE', cardId: nopeCard.id };
+    // 2. Pro Gamer Move: If the top card of the deck is a known bomb, and the current active player
+    // tries to play SKIP or ATTACK to avoid bosing it, we ALWAYS Nope them to force them to draw the bomb!
+    if (isTopCardBomb && (cardType === CardType.SKIP || cardType === CardType.ATTACK)) {
+      const activePlayer = this.game.players.find(p => p.id === action.playerId);
+      // Ensure the active player is the one whose turn it is to draw (turnsToPlay > 0)
+      if (activePlayer && activePlayer.turnsToPlay > 0 && activePlayer.id === this.game.getCurrentPlayer()?.id) {
+        console.log(`[AIBot - Nope] Bot ${player.name} Nopes ${activePlayer.name}'s ${cardType} to force them to draw the known bomb!`);
+        return { type: 'PLAY_NOPE', cardId: nopeCard.id };
+      }
+    }
+
+    // 3. If targeted by Favor or Steal combo:
+    if (isTargeted && (cardType === CardType.FAVOR || action.actionType === '2-CARD' || action.actionType === '3-CARD')) {
+      // Protect our cards if we have a small hand (protecting Defuse/Nope) or in late game
+      const protectingDefuse = hasDefuse && handSize <= 3;
+      const isLateGame = deckSize <= 8;
+      if (protectingDefuse || isLateGame || Math.random() < 0.3) {
+        console.log(`[AIBot - Nope] Bot ${player.name} Nopes combo/favor from ${this.game.players.find(p => p.id === action.playerId)?.name} to protect its hand.`);
+        return { type: 'PLAY_NOPE', cardId: nopeCard.id };
+      }
+      return null;
+    }
+
+    // 4. If opponent plays Attack targeting us (or we are next in turn order):
+    if (cardType === CardType.ATTACK) {
+      // Determine if we are the victim of the attack
+      let nextIndex = (this.game.currentPlayerIndex + 1) % this.game.players.length;
+      while (this.game.players[nextIndex].isEliminated) {
+        nextIndex = (nextIndex + 1) % this.game.players.length;
+      }
+      const nextPlayerId = this.game.players[nextIndex].id;
+
+      if (nextPlayerId === botId || action.targetId === botId) {
+        // Nope the Attack only if we are in danger (no Defuse or deck is late game)
+        if (!hasDefuse || deckSize <= 8) {
+          console.log(`[AIBot - Nope] Bot ${player.name} Nopes Attack from opponent due to danger.`);
+          return { type: 'PLAY_NOPE', cardId: nopeCard.id };
+        }
       }
     }
 

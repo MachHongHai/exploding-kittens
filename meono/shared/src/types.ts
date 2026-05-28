@@ -67,6 +67,8 @@ export interface GameState {
     initiatorId: string;
     lastNoperId?: string;
   };
+  explodingKittensCount?: number;
+  actionHistory?: string[];
 }
 
 export type PlayerAction = 

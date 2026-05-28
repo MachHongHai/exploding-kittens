@@ -469,6 +469,8 @@ export class Game {
       status: this.status,
       currentPlayerId: this.status === 'PLAYING' ? this.getCurrentPlayer()?.id : null,
       drawPileCount: this.drawPile.length,
+      explodingKittensCount: this.drawPile.filter(c => c.type === CardType.EXPLODING_KITTEN).length,
+      actionHistory: this.actionHistory,
       discardPile: this.discardPile.slice(-10),
       lastAction: this.lastAction,
       winner: this.winner,

@@ -26,20 +26,18 @@ IMPORTANT RULES:
 - To end your turn normally, choose the 'DRAW_CARD' action.
 - If you have functional cards (Favor, See The Future, Shuffle) or Pairs, try to play them BEFORE you draw.
 - If you choose 'PLAY_CARDS', you must provide an array of exactly 'cardIds' from your hand.
-- If playing a FAVOR or a Pair (2 cards of same type), provide the 'targetId' of an opponent.
+- If playing a FAVOR or a Pair (2 identical Cat cards), provide the 'targetId' of an opponent.
 
-TACTICAL INSIGHTS:
-- SAVING VALUABLE CARDS: Save high-value cards like ATTACK, SKIP, and SEE_THE_FUTURE for the end game (when the draw pile is small, e.g., under 8 cards) or when you suspect/know a bomb is coming. Do not waste them early on unless you are forced to.
-- MEMORY OF TOP CARDS: Pay attention to the "Cards you know at the top of the draw pile" in the game state.
-- BOMB DANGER PRIORITY: If you know an Exploding Kitten is coming up in the range of cards you are forced to draw (based on 'Your turns to play'), or you suspect a bomb is on top, prioritize your play in this order:
-  1. SKIP or ATTACK: Play them immediately to avoid drawing. (Prefer ATTACK to pressure opponent if they have no Defuse card).
-  2. SEE_THE_FUTURE: If you suspect a bomb but don't know for sure, use this to inspect the top first. If safe, you can save your skip/attack and just draw.
-  3. SHUFFLE: Only play SHUFFLE if you know a bomb is on top, or if you suspect there is a bomb and have no Skip or Attack. Don't shuffle if you know the top card is a safe/good card.
-  4. FAVOR or PAIRS: Try to steal a defense card from opponents.
-- DEFUSING: If 'Requires Defuse right now' is YES, choose 'action': 'DEFUSE'.
-  - Choose 'insertIndex' carefully (0 means top of the deck, 1 means 1 card below top, etc.).
-  - If the next player has no Defuse card, place the bomb at position 0 to eliminate them immediately!
-  - If you want to delay drawing, place it deeper (e.g., index 2 or 3).
+ADVANCED TACTICAL INSIGHTS & TRICKS:
+1. SAFE DRAW (SAVE YOUR CARDS): Pay extreme attention to the "Cards you know at the top of the draw pile". If you KNOW the top card is safe (not an Exploding Kitten), NEVER play Skip, Attack, or Shuffle. Simply choose DRAW_CARD to hoard your valuable defense cards.
+2. BOMB DANGER AVOIDANCE: If you know an Exploding Kitten is within your draw range (e.g. you have 1 turn to play and the bomb is at index 0, or 2 turns and it's at index 0 or 1), you MUST play defense:
+   - Priority 1: ATTACK (ends turn, forces next player to take 2 turns). Best if the next player has no Defuse!
+   - Priority 2: SKIP (ends 1 turn without drawing).
+   - Priority 3: SHUFFLE (randomizes the deck to hopefully move the bomb).
+3. STEALING (FAVOR & PAIRS): Always target opponents who have a large hand or opponents who have a Defuse card. Cat cards MUST be played as Pairs (2 cards of exactly the same type) to steal from a target.
+4. SMART DEFUSING: If you draw a bomb, you must choose 'action': 'DEFUSE'.
+   - Check the next player's status! If the next player HAS NO DEFUSE card, insert the bomb at index 0 (top of the deck) to eliminate them instantly.
+   - If the next player HAS a Defuse card, insert the bomb deeper (e.g., index 2 or 3) to stall for time and keep yourself safe on your next turns.
 
 CURRENT GAME STATE:
 ${gameStateDescription}

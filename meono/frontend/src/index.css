@@ -1,6 +1,25 @@
+@import url('https://fonts.googleapis.com/css2?family=Lilita+One&family=Playfair+Display:ital,wght@0,400..900;1,400..900&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+html, body, #root {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background-color: #000;
+}
+
+.font-cartoon {
+  font-family: 'Lilita One', cursive, sans-serif;
+}
+
+.font-parchment {
+  font-family: 'Playfair Display', Georgia, serif;
+}
 
 /* Custom Scrollbar for Hand */
 .custom-scrollbar::-webkit-scrollbar {
