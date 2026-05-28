@@ -58,6 +58,15 @@ export interface GameState {
     cardId?: string; 
   };
   futureCards?: Card[]; 
+  actionWindow?: {
+    actionId: string;
+    actionName: string;
+    expiresAt: number;
+    nopeCount: number;
+    targetName?: string;
+    initiatorId: string;
+    lastNoperId?: string;
+  };
 }
 
 export type PlayerAction = 
@@ -66,4 +75,6 @@ export type PlayerAction =
   | { type: 'STEAL_CARD', victimId: string, cardIndex: number }
   | { type: 'GIVE_CARD', requesterId: string, cardId: string }
   | { type: 'CONFIRM_FUTURE' }
-  | { type: 'DEFUSE', insertIndex: number };
+  | { type: 'DEFUSE', insertIndex: number }
+  | { type: 'PLAY_NOPE', cardId: string }
+  | { type: 'PASS_NOPE' };

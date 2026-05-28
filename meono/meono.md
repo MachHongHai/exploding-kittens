@@ -105,3 +105,30 @@ Hệ thống sử dụng tính năng **Structured JSON Output** của Gemini đ�
   - Nếu biết có bom sắp tới: Ưu tiên đánh Skip, Attack, hoặc Shuffle.
   - Nếu biết đỉnh bài an toàn: Nhịn bài, thực hiện rút bài.
   - Khi Defuse: Đặt bom ở vị trí tối ưu để hại đối thủ (ví dụ đặt ở index 0 nếu người tiếp theo không có Defuse).
+
+---
+
+## 6. LATEST UPDATES & ARCHITECTURE RULES (CÁC CẬP NHẬT & QUY TẮC KIẾN TRÚC MỚI NHẤT)
+
+### 6.1. UI/UX & Non-blocking Overlays (Giao diện không che chắn)
+- **Quy tắc hiển thị Animation & Overlay:** Các hiệu ứng hiển thị (như khi đánh lá `FAVOR`, trộm bài `2-CARD`, `DEFUSE`, `SEE_THE_FUTURE`) bắt buộc phải là các panel (bảng điều khiển) nằm ở trung tâm màn hình và **KHÔNG ĐƯỢC CHẶN (Non-blocking)** không gian tương tác xung quanh.
+- **Lý do:** Người chơi phải luôn nhìn thấy bài trên tay (hand) và nút ấn `NOPE` cố định ở góc dưới màn hình để có thể kịp thời tung ra bài phản đòn trong thời gian chờ đếm ngược (thường là 5 giây).
+
+### 6.2. Cơ chế Stealing & Action Window (Cửa sổ hành động đếm ngược)
+- Khi một hành động gây hại hướng tới 1 mục tiêu cụ thể (như `FAVOR` hoặc đánh đôi mèo `2-CARD` để trộm bài ngẫu nhiên), hệ thống backend sẽ không xử lý ngay mà mở ra một `actionWindow` (đếm ngược 5 giây).
+- **Auto-Resolve (Tự động giải quyết):** Trong 5 giây đó, nếu nạn nhân hoặc bất kỳ ai đánh `NOPE`, hành động sẽ bị chặn. Nếu không ai `NOPE` và hết 5 giây, hệ thống backend sẽ tự động lấy bài (trộm ngẫu nhiên hoặc buộc người bị đòi đưa bài) để đảm bảo game không bị kẹt.
+
+### 6.3. Sửa lỗi logic `NOPE` (Self-Nope Bug Fix)
+- **Vấn đề đã xử lý:** Trước đây người chơi có thể tự đánh 2 lá Nope liên tiếp (Nope chính lá Nope của mình) dẫn đến huỷ thao tác cản phá của mình.
+- **Giải pháp:** Hệ thống trạng thái `pendingAction` trên server bổ sung thuộc tính `lastNoperId`. Một người chơi không thể đánh lá Nope nếu họ là người vừa đánh lá Nope cuối cùng trên bàn chơi. Ở frontend, nút Nope cũng tự động chuyển trạng thái chờ nếu `lastNoperId` là chính user.
+
+### 6.4. Cấu hình Ván đấu 1v1 (1v1 Deck Optimization)
+- Để tránh các ván đấu 1v1 kéo dài quá lâu và tẻ nhạt, số lượng bài khởi tạo trong `DrawPile` dành cho chế độ 2 người chơi được giới hạn chính xác xuống còn **14 lá** (bao gồm 1 Bom, 2 Defuse dư, và 11 lá chức năng/mèo thường ngẫu nhiên được trộn). Mỗi người vẫn cầm trên tay 8 lá đầu game (1 Defuse + 7 lá thường).
+- Điều này tạo nhịp độ dồn dập, căng thẳng ngay từ những lượt rút đầu tiên.
+
+### 6.5. Tối ưu Chiến thuật Phòng thủ (Defensive Priorities) cho Bot (Medium/Hard)
+- **Tiết kiệm bài giá trị cao:** Bot được lập trình (cả rule-based và prompt Gemini) để hiểu giá trị của các lá phòng ngự như `Attack`, `Skip` và `See The Future`. 
+- Trong giai đoạn đầu và giữa game, nếu biết đỉnh bài an toàn (thông qua `knownDeckTop`), Bot sẽ nhịn bài và chấp nhận rút (Draw) thay vì phí phạm bài chức năng.
+- Các lá phòng thủ quan trọng chỉ được tung ra khi:
+  1. Biết chắc sắp có bom ở ngay lá tiếp theo.
+  2. Nghi ngờ có bom (ví dụ: có người vừa nổ, xài Defuse và đặt bom trở lại ở các vị trí top đầu).

@@ -1,5 +1,5 @@
-import { Card, CardType, GameState, PlayerState } from '../../../shared/src/types';
-import { Player, createDeck, generateCardId, shuffleDeck } from './models';
+import { Card, CardType, GameState, PlayerState } from '../../../shared/src/types.js';
+import { Player, createDeck, generateCardId, shuffleDeck } from './models.js';
 
 export class Game {
   public id: string;
@@ -15,6 +15,20 @@ export class Game {
   public waitingForFavor: { requesterId: string; victimId: string } | null = null;
   public lastTheft: { stealerId: string; victimId: string; cardId?: string } | null = null;
   public playerSeeingFuture: string | null = null;
+  public pendingAction: {
+    actionId: string;
+    playerId: string;
+    actionName: string;
+    actionType: '1-CARD' | '2-CARD' | '3-CARD';
+    cards: Card[];
+    targetId?: string;
+    requestedCardType?: CardType;
+    nopeCount: number;
+    expiresAt: number;
+    lastNoperId?: string;
+  } | null = null;
+  public lastDefuseAction: { playerId: string; drawsSinceDefuse: number } | null = null;
+  public bombCountdown: number | undefined;
 
   constructor(id: string) {
     this.id = id;
@@ -76,6 +90,16 @@ export class Game {
       });
     }
 
+    // If 1v1 (2 players), limit the draw pile to exactly 14 cards (1 kitten + 2 defuses + 11 other cards)
+    if (this.players.length === 2) {
+      const kittens = this.drawPile.filter(c => c.type === CardType.EXPLODING_KITTEN);
+      const defuses = this.drawPile.filter(c => c.type === CardType.DEFUSE);
+      const others = this.drawPile.filter(c => c.type !== CardType.EXPLODING_KITTEN && c.type !== CardType.DEFUSE);
+      
+      const selectedOthers = shuffleDeck(others).slice(0, 11);
+      this.drawPile = [...kittens, ...defuses, ...selectedOthers];
+    }
+
     // 4. Final shuffle
     this.drawPile = shuffleDeck(this.drawPile);
   }
@@ -108,6 +132,8 @@ export class Game {
   playCards(playerId: string, cardIds: string[], targetId?: string, requestedCardType?: CardType): { success: boolean; message?: string } {
     if (this.status !== 'PLAYING') return { success: false, message: "Game not playing" };
     if (this.waitingForDefuse) return { success: false, message: "A player is currently defusing a kitten!" };
+    if (this.pendingAction) return { success: false, message: "An action is currently waiting for Nope!" };
+    
     const player = this.getCurrentPlayer();
     if (player.id !== playerId) return { success: false, message: "Not your turn" };
 
@@ -128,10 +154,114 @@ export class Game {
     if (cards.length === 1) {
       const card = cards[0];
       if (card.type.startsWith('CAT_CARD')) return { success: false, message: "Cat cards must be played in pairs!" };
+      if (card.type === CardType.NOPE) return { success: false, message: "Nope cards must be played during an Action Window!" };
+      if (card.type === CardType.DEFUSE || card.type === CardType.EXPLODING_KITTEN) return { success: false, message: "Cannot play this card normally!" };
       
-      player.removeCard(card.id);
-      this.discardPile.push(card);
+      if (card.type === CardType.FAVOR && !targetId) return { success: false, message: "Favor requires a target" };
 
+      cards.forEach(c => player.removeCard(c.id) && this.discardPile.push(c));
+      this.pendingAction = {
+        actionId: generateCardId(),
+        playerId,
+        actionName: card.name,
+        actionType: '1-CARD',
+        cards,
+        targetId,
+        nopeCount: 0,
+        expiresAt: Date.now() + 5000
+      };
+      this.lastAction = `${player.name} played ${card.name}.`;
+      return { success: true };
+    }
+
+    if (cards.length === 2) {
+      if (!isSameType) return { success: false, message: "Must be same type" };
+      if (!targetId) return { success: false, message: "Requires target" };
+      const target = this.players.find(p => p.id === targetId);
+      if (!target || target.handCount === 0) return { success: false, message: "Invalid target" };
+
+      cards.forEach(c => player.removeCard(c.id) && this.discardPile.push(c));
+      this.pendingAction = {
+        actionId: generateCardId(),
+        playerId,
+        actionName: 'Pair',
+        actionType: '2-CARD',
+        cards,
+        targetId,
+        nopeCount: 0,
+        expiresAt: Date.now() + 5000
+      };
+      this.lastAction = `${player.name} played a Pair on ${target.name}.`;
+      return { success: true };
+    }
+
+    if (cards.length === 3) {
+      if (!isSameType || !targetId || !requestedCardType) return { success: false, message: "Invalid 3-of-a-kind play" };
+      const target = this.players.find(p => p.id === targetId);
+      if (!target || target.handCount === 0) return { success: false, message: "Invalid target" };
+
+      const idx = target.hand.findIndex(c => c.type === requestedCardType);
+      if (idx === -1) return { success: false, message: `${target.name} has no ${requestedCardType}!` };
+
+      cards.forEach(c => player.removeCard(c.id) && this.discardPile.push(c));
+      this.pendingAction = {
+        actionId: generateCardId(),
+        playerId,
+        actionName: 'Three of a kind',
+        actionType: '3-CARD',
+        cards,
+        targetId,
+        requestedCardType,
+        nopeCount: 0,
+        expiresAt: Date.now() + 5000
+      };
+      this.lastAction = `${player.name} played Three of a kind on ${target.name}.`;
+      return { success: true };
+    }
+
+    return { success: false, message: "Invalid play" };
+  }
+
+  playNope(playerId: string, cardId: string): { success: boolean; message?: string } {
+    if (!this.pendingAction) return { success: false, message: "No action to Nope!" };
+    if (this.pendingAction.lastNoperId === playerId) return { success: false, message: "You cannot Nope your own Nope!" };
+    
+    const player = this.players.find(p => p.id === playerId);
+    if (!player) return { success: false, message: "Player not found" };
+
+    const nopeCard = player.hand.find(c => c.id === cardId && c.type === CardType.NOPE);
+    if (!nopeCard) return { success: false, message: "Nope card not found in hand" };
+
+    player.removeCard(nopeCard.id);
+    this.discardPile.push(nopeCard);
+
+    this.pendingAction.nopeCount++;
+    this.pendingAction.lastNoperId = playerId;
+    this.pendingAction.expiresAt = Date.now() + 5000;
+    
+    this.lastAction = `${player.name} played Nope! (Total Nopes: ${this.pendingAction.nopeCount})`;
+    return { success: true };
+  }
+
+  resolvePendingAction() {
+    if (!this.pendingAction) return;
+
+    const action = this.pendingAction;
+    this.pendingAction = null;
+
+    const isNoped = action.nopeCount % 2 !== 0;
+    const player = this.players.find(p => p.id === action.playerId);
+    
+    if (!player) return;
+
+    if (isNoped) {
+      this.lastAction = `${player.name}'s ${action.actionName} was NOPED!`;
+      return;
+    }
+
+    // Execute the action
+    if (action.actionType === '1-CARD') {
+      const card = action.cards[0];
       switch (card.type) {
         case CardType.ATTACK:
           this.lastAction = `${player.name} played Attack!`;
@@ -149,6 +279,7 @@ export class Game {
           this.lastAction = `${player.name} played Shuffle!`;
           this.drawPile = shuffleDeck(this.drawPile);
           this.players.forEach(p => p.knownDeckTop = []);
+          this.lastDefuseAction = null; // Clear suspected positions
           break;
         case CardType.SEE_THE_FUTURE:
           this.lastAction = `${player.name} played See The Future!`;
@@ -159,8 +290,7 @@ export class Game {
           }
           break;
         case CardType.FAVOR:
-          if (!targetId) return { success: false, message: "Favor requires a target" };
-          const target = this.players.find(p => p.id === targetId);
+          const target = this.players.find(p => p.id === action.targetId);
           if (target && target.handCount > 0) {
             this.waitingForFavor = { requesterId: player.id, victimId: target.id };
             this.lastAction = `${player.name} played Favor on ${target.name}.`;
@@ -170,46 +300,31 @@ export class Game {
           this.lastAction = `${player.name} played ${card.name}.`;
           break;
       }
-      return { success: true };
-    }
-
-    if (cards.length === 2) {
-      if (!isSameType) return { success: false, message: "Must be same type" };
-      if (!targetId) return { success: false, message: "Requires target" };
-      const target = this.players.find(p => p.id === targetId);
-      if (!target || target.handCount === 0) return { success: false, message: "Invalid target" };
-
-      cards.forEach(c => player.removeCard(c.id) && this.discardPile.push(c));
-
-      if (!player.isBot) {
-        this.waitingForSteal = { stealerId: player.id, victimId: target.id, count: 1 };
-        this.lastAction = `${player.name} played a Pair on ${target.name}.`;
-      } else {
-        const stolenCard = target.hand.splice(Math.floor(Math.random() * target.handCount), 1)[0];
-        player.drawCard(stolenCard);
-        this.lastAction = `${player.name} played a Pair and stole from ${target.name}.`;
-        this.lastTheft = { stealerId: player.id, victimId: target.id, cardId: stolenCard.id };
+    } else if (action.actionType === '2-CARD') {
+      const target = this.players.find(p => p.id === action.targetId);
+      if (target && target.handCount > 0) {
+        if (!player.isBot) {
+          this.waitingForSteal = { stealerId: player.id, victimId: target.id, count: 1 };
+          this.lastAction = `${player.name} played a Pair on ${target.name}.`;
+        } else {
+          const stolenCard = target.hand.splice(Math.floor(Math.random() * target.handCount), 1)[0];
+          player.drawCard(stolenCard);
+          this.lastAction = `${player.name} played a Pair and stole from ${target.name}.`;
+          this.lastTheft = { stealerId: player.id, victimId: target.id, cardId: stolenCard.id };
+        }
       }
-      return { success: true };
+    } else if (action.actionType === '3-CARD') {
+      const target = this.players.find(p => p.id === action.targetId);
+      if (target && target.handCount > 0 && action.requestedCardType) {
+        const idx = target.hand.findIndex(c => c.type === action.requestedCardType);
+        if (idx !== -1) {
+          const stolenCard = target.hand.splice(idx, 1)[0];
+          player.drawCard(stolenCard);
+          this.lastAction = `${player.name} successfully guessed ${action.requestedCardType} from ${target.name}!`;
+          this.lastTheft = { stealerId: player.id, victimId: target.id, cardId: stolenCard.id };
+        }
+      }
     }
-
-    if (cards.length === 3) {
-      if (!isSameType || !targetId || !requestedCardType) return { success: false, message: "Invalid 3-of-a-kind play" };
-      const target = this.players.find(p => p.id === targetId);
-      if (!target || target.handCount === 0) return { success: false, message: "Invalid target" };
-
-      const idx = target.hand.findIndex(c => c.type === requestedCardType);
-      if (idx === -1) return { success: false, message: `${target.name} has no ${requestedCardType}!` };
-
-      cards.forEach(c => player.removeCard(c.id) && this.discardPile.push(c));
-      const stolenCard = target.hand.splice(idx, 1)[0];
-      player.drawCard(stolenCard);
-      this.lastAction = `${player.name} successfully guessed ${requestedCardType} from ${target.name}!`;
-      this.lastTheft = { stealerId: player.id, victimId: target.id, cardId: stolenCard.id };
-      return { success: true };
-    }
-
-    return { success: false, message: "Invalid play" };
   }
 
   stealCard(stealerId: string, victimId: string, cardIndex: number): boolean {
@@ -262,6 +377,7 @@ export class Game {
 
     if (card.type === CardType.EXPLODING_KITTEN) {
       this.lastAction = `${player.name} drew an Exploding Kitten!`;
+      this.lastDefuseAction = null;
       if (player.hasDefuse()) {
         this.waitingForDefuse = player.id;
         return 'DEFUSE_REQUIRED';
@@ -271,6 +387,11 @@ export class Game {
     }
     player.drawCard(card);
     this.lastAction = `${player.name} drew a card.`;
+    
+    if (this.lastDefuseAction) {
+      this.lastDefuseAction.drawsSinceDefuse++;
+    }
+
     if (--player.turnsToPlay <= 0) this.nextTurn();
     return 'SAFE';
   }
@@ -302,6 +423,8 @@ export class Game {
         p.knownDeckTop = [];
       }
     });
+
+    this.lastDefuseAction = { playerId, drawsSinceDefuse: 0 };
 
     this.lastAction = `${player.name} defused the kitten!`;
     this.waitingForDefuse = null;
@@ -339,6 +462,15 @@ export class Game {
       waitingForFavor: this.waitingForFavor || undefined,
       lastTheft: this.lastTheft || undefined,
       futureCards: this.playerSeeingFuture === playerId ? this.drawPile.slice(-3).reverse() : undefined,
+      actionWindow: this.pendingAction ? {
+        actionId: this.pendingAction.actionId,
+        actionName: this.pendingAction.actionName,
+        expiresAt: this.pendingAction.expiresAt,
+        nopeCount: this.pendingAction.nopeCount,
+        targetName: this.players.find(p => p.id === this.pendingAction?.targetId)?.name,
+        initiatorId: this.pendingAction.playerId,
+        lastNoperId: this.pendingAction.lastNoperId
+      } : undefined,
       players: this.players.map(p => ({
         id: p.id,
         name: p.name,

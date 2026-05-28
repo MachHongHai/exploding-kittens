@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { CardType } from '../../../shared/src/types';
-import type { GameState, PlayerAction, Card } from '../../../shared/src/types';
+import type { GameState, PlayerAction } from '../../../shared/src/types';
 import { CardView } from './CardView';
 
 interface GameBoardProps {
@@ -43,17 +43,15 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
   const victim = gameState.players.find(p => p.id === victimId);
 
   // Favor logic
-  const isFavorRequester = gameState.waitingForFavor?.requesterId === socketId;
   const isFavorVictim = gameState.waitingForFavor?.victimId === socketId;
   const favorRequester = gameState.players.find(p => p.id === gameState.waitingForFavor?.requesterId);
-  const favorVictim = gameState.players.find(p => p.id === gameState.waitingForFavor?.victimId);
 
   // Theft animation logic (for when I'M being stolen from BLINDLY via Pairs)
   const isBeingStolenFrom = gameState.lastTheft?.victimId === socketId && !gameState.waitingForFavor;
-  const stolenCardId = gameState.lastTheft?.cardId;
 
   const toggleCardSelection = (cardId: string) => {
-    if (isExploding || isStealer || isSeeingFuture) return;
+    setActionError(null);
+    if (isExploding || isStealer || isSeeingFuture || gameState.actionWindow) return;
     
     // If being asked for a favor, select the card to give
     if (isFavorVictim) {
@@ -83,70 +81,122 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
     onAction({ type: 'CONFIRM_FUTURE' });
   };
 
+  const renderActionWindow = () => {
+    const showWindow = gameState.actionWindow && !(gameState.actionWindow.initiatorId === socketId && gameState.actionWindow.nopeCount === 0);
+    const nopeCard = myPlayer?.hand?.find(c => c.type === CardType.NOPE);
+
+    return (
+      <AnimatePresence>
+        {showWindow && (() => {
+          const { actionName, nopeCount, targetName } = gameState.actionWindow!;
+          const isNoped = nopeCount % 2 !== 0;
+
+          return (
+            <motion.div 
+              key="action-window-modal"
+              initial={{ opacity: 0, scale: 0.9, y: 30 }} 
+              animate={{ opacity: 1, scale: 1, y: 0 }} 
+              exit={{ opacity: 0, scale: 0.9, y: 30 }}
+              className={`absolute top-[35%] left-1/2 -translate-x-1/2 -translate-y-1/2 w-[90%] max-w-sm p-6 rounded-[2.5rem] border shadow-[0_0_50px_rgba(0,0,0,0.8)] z-[70] flex flex-col items-center pointer-events-auto backdrop-blur-md ${isNoped ? 'bg-red-950/80 border-red-500/30' : 'bg-slate-950/85 border-blue-500/30'}`}
+            >
+              <h2 className="text-2xl font-black text-white mb-1 uppercase tracking-tighter italic">
+                {isNoped ? "NOPED!" : "YUPPED!"}
+              </h2>
+              <div className="text-sm font-bold text-slate-300 mb-4 uppercase tracking-widest text-center">
+                Action: <span className="text-orange-400">{actionName}</span> {targetName && `on ${targetName}`}
+              </div>
+              
+              <div className="text-xs font-black mb-3">
+                Status: <span className={isNoped ? 'text-red-500' : 'text-emerald-500'}>{isNoped ? 'CANCELLED' : 'PROCEEDING'}</span>
+                <span className="text-slate-400 font-normal ml-2">(Nopes: {nopeCount})</span>
+              </div>
+
+              {/* Simple progress bar mock */}
+              <div className="w-full h-1 bg-white/10 rounded-full overflow-hidden mb-4">
+                 <motion.div 
+                    className="h-full bg-blue-500" 
+                    initial={{ width: "100%" }} 
+                    animate={{ width: "0%" }} 
+                    transition={{ duration: 5, ease: "linear" }}
+                    key={nopeCount} // Reset animation when nopeCount changes
+                 />
+              </div>
+
+              <div className="flex gap-4 justify-center w-full">
+                 <button 
+                   disabled={!nopeCard}
+                   onClick={() => nopeCard && onAction({ type: 'PLAY_NOPE', cardId: nopeCard.id })}
+                   className={`w-full py-2.5 rounded-full font-black uppercase text-xs tracking-wider transition-all ${nopeCard ? 'bg-red-600 hover:bg-red-500 text-white shadow-[0_0_20px_rgba(220,38,38,0.4)] hover:scale-105 active:scale-95' : 'bg-white/5 text-slate-600 cursor-not-allowed'}`}
+                 >
+                   NOPE! {nopeCard && '🃏'}
+                 </button>
+              </div>
+              {!nopeCard && <p className="text-slate-500 text-[8px] mt-2 uppercase tracking-widest">You don't have a Nope card</p>}
+            </motion.div>
+          );
+        })()}
+      </AnimatePresence>
+    );
+  };
+
   const renderFavorOverlay = () => {
-    if (!isFavorVictim || !favorRequester) return null;
+    const showFavor = isFavorVictim && favorRequester;
     const selectedCard = myPlayer?.hand?.find(c => c.id === selectedCardIds[0]);
 
     return (
-      <motion.div 
-        initial={{ opacity: 0 }} 
-        animate={{ opacity: 1 }} 
-        className="absolute inset-0 bg-black/90 backdrop-blur-3xl z-40 flex flex-col items-center justify-center p-8"
-        onPointerUp={() => {
-          if (isDragging && selectedCardIds.length > 0) handleGiveCard();
-          setIsDragging(false);
-        }}
-      >
-          <motion.div initial={{ y: -50 }} animate={{ y: 0 }} className="text-center mb-12">
-            <h2 className="text-5xl font-black text-purple-400 mb-2 uppercase tracking-tighter italic">
+      <AnimatePresence>
+        {showFavor && (
+          <motion.div 
+            key="favor-overlay"
+            initial={{ opacity: 0, scale: 0.9, y: 30 }} 
+            animate={{ opacity: 1, scale: 1, y: 0 }} 
+            exit={{ opacity: 0, scale: 0.9, y: 30 }}
+            className="absolute top-[35%] left-1/2 -translate-x-1/2 -translate-y-1/2 w-[90%] max-w-sm bg-slate-900 border border-purple-500/30 rounded-[2.5rem] p-6 shadow-[0_0_50px_rgba(168,85,247,0.15)] z-40 text-center flex flex-col items-center justify-center"
+          >
+            <h2 className="text-2xl font-black text-purple-400 mb-1 uppercase tracking-tighter italic">
               FAVOR REQUESTED
             </h2>
-            <p className="text-slate-300 font-bold uppercase tracking-[0.2em] text-sm">
-              Give <span className="text-white bg-purple-500/30 px-3 py-1 rounded-lg border border-purple-500/50 ml-1">{favorRequester.name}</span> a card
+            <p className="text-xs text-slate-300 font-bold uppercase tracking-widest mb-6">
+              Give <span className="text-white bg-purple-500/30 px-2 py-0.5 rounded border border-purple-500/50">{favorRequester.name}</span> a card
             </p>
-          </motion.div>
 
-          {/* THE CAT PAW - The Drop Zone */}
-          <div className="relative mb-20">
-             <motion.div 
-                animate={isDragging ? { scale: 1.1, rotate: [0, -2, 2, 0] } : { scale: 1 }}
-                className={`w-64 h-64 rounded-full flex items-center justify-center border-4 border-dashed transition-all duration-500 ${isDragging ? 'border-purple-400 bg-purple-500/10 shadow-[0_0_80px_rgba(168,85,247,0.3)]' : 'border-white/10 bg-white/5'}`}
-             >
-                <div className="flex flex-col items-center gap-4 text-white/20 uppercase font-black tracking-widest text-center">
-                   <span className="text-8xl filter grayscale opacity-50 drop-shadow-2xl">🐾</span>
-                   <span className="text-[10px]">Drop Card Here</span>
-                </div>
-             </motion.div>
-             
-             {/* Paw reaching from top animation */}
-             <motion.div 
-                initial={{ y: -300 }} 
-                animate={{ y: isDragging ? -20 : -40 }} 
-                className="absolute -top-12 left-1/2 -translate-x-1/2 pointer-events-none"
-             >
-                <span className="text-9xl filter drop-shadow-2xl">🐈</span>
-             </motion.div>
-          </div>
-
-          <AnimatePresence>
-            {selectedCardIds.length > 0 && (
-              <motion.div initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 20, opacity: 0 }} className="flex flex-col items-center gap-6">
-                <button 
-                  onClick={handleGiveCard}
-                  className="bg-purple-600 hover:bg-purple-500 text-white font-black px-12 py-5 rounded-full text-xl shadow-[0_0_50px_rgba(168,85,247,0.5)] uppercase tracking-[0.2em] transition-all hover:scale-105 active:scale-95"
+            <AnimatePresence mode="wait">
+              {selectedCard ? (
+                <motion.div 
+                  key="give-btn"
+                  initial={{ y: 10, opacity: 0 }} 
+                  animate={{ y: 0, opacity: 1 }} 
+                  exit={{ y: -10, opacity: 0 }} 
+                  className="flex flex-col items-center gap-4 w-full"
                 >
-                  Give "{selectedCard?.name}"
-                </button>
-                <span className="text-[10px] text-purple-400 font-bold uppercase tracking-[0.3em] animate-pulse">or drag into the paw</span>
-              </motion.div>
-            )}
-          </AnimatePresence>
-      </motion.div>
+                  <button 
+                    onClick={handleGiveCard}
+                    className="w-full bg-purple-600 hover:bg-purple-500 text-white font-black py-3 rounded-full text-sm shadow-[0_0_30px_rgba(168,85,247,0.4)] uppercase tracking-wider transition-all hover:scale-102 active:scale-98"
+                  >
+                    Give "{selectedCard.name}"
+                  </button>
+                  <span className="text-[9px] text-purple-400 font-bold uppercase tracking-widest animate-pulse">Tap another card to change</span>
+                </motion.div>
+              ) : (
+                <motion.div 
+                  key="select-msg"
+                  initial={{ y: 10, opacity: 0 }} 
+                  animate={{ y: 0, opacity: 1 }} 
+                  exit={{ y: -10, opacity: 0 }}
+                  className="text-slate-500 text-xs font-bold uppercase tracking-widest border border-dashed border-white/10 rounded-2xl py-6 px-4 w-full"
+                >
+                  Select a card from your hand below...
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </motion.div>
+        )}
+      </AnimatePresence>
     );
   };
 
   const handlePlayCombo = (requestedCardType?: CardType) => {
-    if (!isMyTurn || selectedCardIds.length === 0) return;
+    if (!isMyTurn || selectedCardIds.length === 0 || gameState.actionWindow) return;
     
     const selectedCards = myPlayer?.hand?.filter(c => selectedCardIds.includes(c.id)) || [];
     const isSameType = selectedCards.every(c => c.type === selectedCards[0].type);
@@ -158,7 +208,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
         setActionError("Cat cards must be played in pairs!");
         return;
       }
-      if ([CardType.FAVOR].includes(selectedCards[0].type)) {
+      if (selectedCards[0].type === CardType.FAVOR) {
         if (!targetPlayerId) { setActionError("Select a target player first!"); return; }
         action = { type: 'PLAY_CARDS', cardIds: selectedCardIds, targetId: targetPlayerId };
       } else {
@@ -273,7 +323,6 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
         if (e.buttons === 1 && selectedCardIds.length > 0) setIsDragging(true);
       }}
     >
-      <AnimatePresence>
       
       {/* Background Orbs */}
       <div className="absolute top-[-10%] left-[-10%] w-[40vw] h-[40vw] rounded-full bg-purple-900/10 blur-[120px] pointer-events-none"></div>
@@ -369,39 +418,47 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
       </div>
 
       {/* See The Future Overlay */}
-      {isSeeingFuture && gameState.futureCards && (
-        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="absolute inset-0 bg-black/80 backdrop-blur-3xl z-[60] flex flex-col items-center justify-center p-8">
-            <motion.h2 initial={{ y: -20 }} animate={{ y: 0 }} className="text-4xl font-black text-pink-500 mb-4 uppercase tracking-tighter italic">
-              Seeing the Future
-            </motion.h2>
-            <p className="text-slate-400 mb-16 font-bold uppercase tracking-[0.3em] text-xs text-center">Top 3 cards of the deck (Left to Right)</p>
-            
-            <div className="flex justify-center gap-8 mb-20">
-               {gameState.futureCards.map((card, i) => (
-                 <motion.div 
-                    key={card.id} 
-                    initial={{ y: 100, opacity: 0, rotate: -20 }}
-                    animate={{ y: 0, opacity: 1, rotate: 0 }}
-                    transition={{ delay: i * 0.2, type: "spring" }}
-                 >
-                    <CardView card={card} disabled className="shadow-[0_0_50px_rgba(236,72,153,0.3)] border-pink-500/30" />
-                    <div className="mt-4 text-center">
-                       <span className="text-[10px] font-black text-pink-500 uppercase tracking-widest bg-pink-500/10 px-3 py-1 rounded-full border border-pink-500/20">
-                         Pos {i + 1}
-                       </span>
-                    </div>
-                 </motion.div>
-               ))}
-            </div>
+      <AnimatePresence>
+        {isSeeingFuture && gameState.futureCards && (
+          <motion.div 
+            key="see-future-overlay"
+            initial={{ opacity: 0 }} 
+            animate={{ opacity: 1 }} 
+            exit={{ opacity: 0 }}
+            className="absolute inset-0 bg-black/80 backdrop-blur-3xl z-[60] flex flex-col items-center justify-center p-8"
+          >
+              <motion.h2 initial={{ y: -20 }} animate={{ y: 0 }} className="text-4xl font-black text-pink-500 mb-4 uppercase tracking-tighter italic">
+                Seeing the Future
+              </motion.h2>
+              <p className="text-slate-400 mb-16 font-bold uppercase tracking-[0.3em] text-xs text-center">Top 3 cards of the deck (Left to Right)</p>
+              
+              <div className="flex justify-center gap-8 mb-20">
+                 {gameState.futureCards.map((card, i) => (
+                   <motion.div 
+                      key={card.id} 
+                      initial={{ y: 100, opacity: 0, rotate: -20 }}
+                      animate={{ y: 0, opacity: 1, rotate: 0 }}
+                      transition={{ delay: i * 0.2, type: "spring" }}
+                   >
+                      <CardView card={card} disabled className="shadow-[0_0_50px_rgba(236,72,153,0.3)] border-pink-500/30" />
+                      <div className="mt-4 text-center">
+                         <span className="text-[10px] font-black text-pink-500 uppercase tracking-widest bg-pink-500/10 px-3 py-1 rounded-full border border-pink-500/20">
+                           Pos {i + 1}
+                         </span>
+                      </div>
+                   </motion.div>
+                 ))}
+              </div>
 
-            <button 
-              onClick={handleConfirmFuture}
-              className="px-12 py-4 rounded-full bg-white text-black font-black uppercase tracking-[0.2em] hover:bg-pink-500 hover:text-white transition-all duration-500 shadow-2xl scale-110 active:scale-95"
-            >
-              Put Them Back
-            </button>
-        </motion.div>
-      )}
+              <button 
+                onClick={handleConfirmFuture}
+                className="px-12 py-4 rounded-full bg-white text-black font-black uppercase tracking-[0.2em] hover:bg-pink-500 hover:text-white transition-all duration-500 shadow-2xl scale-110 active:scale-95"
+              >
+                Put Them Back
+              </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Explosions & Alerts */}
       {gameState.waitingForDefuse && gameState.waitingForDefuse !== socketId && (
@@ -415,69 +472,96 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
         </div>
       )}
 
+      {/* Action Window Overlay */}
+      {renderActionWindow()}
+
       {/* Favor Request Overlay */}
       {renderFavorOverlay()}
 
-      {isExploding && isMyTurn && (
-        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="absolute inset-0 bg-red-950/95 backdrop-blur-3xl flex flex-col items-center justify-center z-50 p-6">
-            <h2 className="text-7xl md:text-9xl font-black text-white mb-2 animate-bounce">KABOOM!</h2>
-            <p className="text-lg text-red-200 font-bold mb-8 uppercase tracking-widest">Self-Destruction In {gameState.bombCountdown ?? 15}s</p>
-            {hasDefuse ? (
-              <div className="flex flex-wrap justify-center gap-4">
-                <button onClick={() => onAction({ type: 'DEFUSE', insertIndex: 0 })} className="px-8 py-4 rounded-full bg-emerald-500 font-black uppercase tracking-wider text-black">Top</button>
-                <button onClick={() => onAction({ type: 'DEFUSE', insertIndex: 1 })} className="px-8 py-4 rounded-full bg-white/10 border border-white/20 font-black uppercase tracking-wider">2nd</button>
-                <button onClick={() => onAction({ type: 'DEFUSE', insertIndex: Math.floor(Math.random() * 20) })} className="px-8 py-4 rounded-full bg-white/10 border border-white/20 font-black uppercase tracking-wider">Random</button>
-              </div>
-            ) : <p className="text-3xl font-black text-red-500 animate-pulse">NO DEFUSE CARD!</p>}
-        </motion.div>
-      )}
+      <AnimatePresence>
+        {isExploding && isMyTurn && (
+          <motion.div 
+            key="kaboom-overlay"
+            initial={{ opacity: 0 }} 
+            animate={{ opacity: 1 }} 
+            exit={{ opacity: 0 }}
+            className="absolute inset-0 bg-red-950/95 backdrop-blur-3xl flex flex-col items-center justify-center z-50 p-6"
+          >
+              <h2 className="text-7xl md:text-9xl font-black text-white mb-2 animate-bounce">KABOOM!</h2>
+              <p className="text-lg text-red-200 font-bold mb-8 uppercase tracking-widest">Self-Destruction In {gameState.bombCountdown ?? 15}s</p>
+              {hasDefuse ? (
+                <div className="flex flex-wrap justify-center gap-4">
+                  <button onClick={() => onAction({ type: 'DEFUSE', insertIndex: 0 })} className="px-8 py-4 rounded-full bg-emerald-500 font-black uppercase tracking-wider text-black">Top</button>
+                  <button onClick={() => onAction({ type: 'DEFUSE', insertIndex: 1 })} className="px-8 py-4 rounded-full bg-white/10 border border-white/20 font-black uppercase tracking-wider">2nd</button>
+                  <button onClick={() => onAction({ type: 'DEFUSE', insertIndex: Math.floor(Math.random() * 20) })} className="px-8 py-4 rounded-full bg-white/10 border border-white/20 font-black uppercase tracking-wider">Random</button>
+                </div>
+              ) : <p className="text-3xl font-black text-red-500 animate-pulse">NO DEFUSE CARD!</p>}
+          </motion.div>
+        )}
+      </AnimatePresence>
 
-      {/* Theft Fan Animation (Being Stolen From) */}
-      {isBeingStolenFrom && (
-        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="absolute inset-0 bg-black/60 backdrop-blur-xl z-40 flex flex-col items-center justify-center">
-            <h2 className="text-4xl font-black text-orange-500 mb-12 uppercase tracking-tighter italic">Someone is stealing from you!</h2>
-            <div className="flex -space-x-12">
-               {myPlayer?.hand?.map((card, i) => {
-                 const isTheStolenOne = card.id === stolenCardId;
-                 return (
-                   <motion.div 
-                    key={card.id} 
-                    animate={isTheStolenOne ? { y: -200, opacity: 0, scale: 1.2 } : { rotate: (i - (myPlayer.hand?.length || 0)/2) * 5 }}
-                    transition={{ duration: 1.5, ease: "easeInOut" }}
-                   >
-                     <CardView disabled />
-                   </motion.div>
-                 )
-               })}
-            </div>
-        </motion.div>
-      )}
+      {/* Theft Flying Animation (Being Stolen From) */}
+      <AnimatePresence>
+        {isBeingStolenFrom && (
+          <motion.div 
+            key={gameState.lastAction || "theft-animation"}
+            initial={{ top: '80%', left: '50%', x: '-50%', y: '-50%', scale: 1, opacity: 1 }} 
+            animate={{ 
+              top: gameState.lastTheft?.stealerId === opponents[0]?.id ? '50%' : 
+                   gameState.lastTheft?.stealerId === opponents[1]?.id ? '15%' : 
+                   gameState.lastTheft?.stealerId === opponents[2]?.id ? '50%' : 
+                   gameState.lastTheft?.stealerId === opponents[3]?.id ? '70%' : '50%',
+              left: gameState.lastTheft?.stealerId === opponents[0]?.id ? '10%' : 
+                    gameState.lastTheft?.stealerId === opponents[1]?.id ? '50%' : 
+                    gameState.lastTheft?.stealerId === opponents[2]?.id ? '90%' : 
+                    gameState.lastTheft?.stealerId === opponents[3]?.id ? '90%' : '50%',
+              scale: 0.3,
+              opacity: [1, 1, 0.9, 0]
+            }} 
+            exit={{ opacity: 0 }}
+            transition={{ duration: 1, times: [0, 0.7, 0.9, 1], ease: "easeInOut" }}
+            className="absolute z-[100] pointer-events-none"
+          >
+              <CardView disabled />
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Interactive Steal Overlay (When I AM stealing) */}
-      {isStealer && victim && (
-        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="absolute inset-0 bg-black/80 backdrop-blur-3xl z-40 flex flex-col items-center justify-center p-8">
-            <motion.h2 initial={{ y: -20 }} animate={{ y: 0 }} className="text-4xl font-black text-white mb-4 uppercase tracking-tighter italic">
-              Stealing from {victim.name}
-            </motion.h2>
-            <p className="text-slate-400 mb-16 font-bold uppercase tracking-[0.3em] text-xs">Pick a card from their hand</p>
-            
-            <div className="flex flex-wrap justify-center -space-x-16 sm:-space-x-24 hover:space-x-4 transition-all duration-500">
-               {Array.from({ length: victim.handCount }).map((_, i) => (
-                 <motion.div 
-                    key={i} 
-                    initial={{ y: 50, opacity: 0 }}
-                    animate={{ y: 0, opacity: 1 }}
-                    transition={{ delay: i * 0.05 }}
-                    whileHover={{ y: -30, scale: 1.1, zIndex: 100 }}
-                    className="relative"
-                    onClick={() => handleStealPick(i)}
-                 >
-                    <CardView className="cursor-pointer border-orange-500/30 hover:border-orange-500 shadow-2xl" />
-                 </motion.div>
-               ))}
-            </div>
-        </motion.div>
-      )}
+      <AnimatePresence>
+        {isStealer && victim && (
+          <motion.div 
+            key="steal-overlay"
+            initial={{ opacity: 0, scale: 0.9 }} 
+            animate={{ opacity: 1, scale: 1 }} 
+            exit={{ opacity: 0, scale: 0.9 }} 
+            className="absolute top-[35%] left-1/2 -translate-x-1/2 -translate-y-1/2 w-[95%] max-w-lg bg-slate-900/95 border border-orange-500/30 rounded-[2.5rem] p-6 shadow-[0_0_50px_rgba(249,115,22,0.2)] z-40 text-center flex flex-col items-center justify-center"
+          >
+              <h2 className="text-xl font-black text-white mb-1 uppercase tracking-tighter italic">
+                Stealing from {victim.name}
+              </h2>
+              <p className="text-xs text-slate-400 mb-6 font-bold uppercase tracking-widest">Pick a card from their hand</p>
+              
+              <div className="flex flex-wrap justify-center -space-x-12 sm:-space-x-16 hover:space-x-2 transition-all duration-300">
+                 {Array.from({ length: victim.handCount }).map((_, i) => (
+                   <motion.div 
+                      key={i} 
+                      initial={{ y: 20, opacity: 0 }}
+                      animate={{ y: 0, opacity: 1 }}
+                      transition={{ delay: i * 0.05 }}
+                      whileHover={{ y: -15, scale: 1.05, zIndex: 10 }}
+                      className="relative cursor-pointer"
+                      onClick={() => handleStealPick(i)}
+                    >
+                      <div className="transform scale-[0.7] origin-center">
+                        <CardView className="border-orange-500/30 hover:border-orange-500 shadow-xl" />
+                      </div>
+                   </motion.div>
+                 ))}
+              </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* 3-of-a-Kind Modal */}
       {showGuessModal && (
@@ -501,21 +585,27 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
       <div className="absolute bottom-0 left-0 right-0 flex flex-col items-center justify-end pb-8 bg-gradient-to-t from-black via-black/95 to-transparent pt-48 z-20 pointer-events-none">
         
         <AnimatePresence>
-          {selectedCardIds.length > 0 && !isExploding && (
+          {selectedCardIds.length > 0 && !isExploding && !isFavorVictim && (
             <motion.div initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 20, opacity: 0 }} className="absolute bottom-full mb-8 flex flex-col items-center pointer-events-auto">
               <button 
                 onClick={() => handlePlayCombo()}
                 className="bg-orange-500 hover:bg-orange-400 text-white font-black px-12 py-4 rounded-full text-xl shadow-[0_0_50px_rgba(249,115,22,0.4)] uppercase tracking-[0.2em] transition-all hover:scale-105"
               >
-                Play Combo ({selectedCardIds.length})
+                Play ({selectedCardIds.length})
               </button>
               <span className="text-[10px] text-orange-400 mt-2 font-bold uppercase tracking-[0.3em] animate-pulse">Swipe up to release</span>
             </motion.div>
           )}
         </AnimatePresence>
 
+        {actionError && (
+          <div className="px-4 py-2 rounded-xl bg-red-950/80 border border-red-500/30 text-red-400 font-bold uppercase tracking-wider text-[10px] mb-4 pointer-events-auto">
+            {actionError}
+          </div>
+        )}
+
         <div className={`px-6 py-2 rounded-full font-black uppercase tracking-[0.2em] text-[10px] mb-8 border backdrop-blur-3xl transition-all duration-1000 pointer-events-auto ${isMyTurn ? "bg-orange-500 text-white border-orange-400 shadow-[0_0_30px_rgba(249,115,22,0.3)]" : "bg-white/5 text-slate-600 border-white/5"}`}>
-          {isMyTurn ? `Your Action Phase` : "Waiting for Bot..."}
+          {isMyTurn ? `Your Action Phase ${myPlayer?.turnsToPlay && myPlayer.turnsToPlay > 1 ? `(${myPlayer.turnsToPlay} Turns Left)` : ''}` : "Waiting for Bot..."}
         </div>
         
         {myPlayer?.isEliminated ? (
@@ -545,7 +635,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
                       <CardView 
                         card={card} 
                         layoutId={card.id}
-                        onClick={() => isFavorVictim ? handleGiveCard(card.id) : toggleCardSelection(card.id)}
+                        onClick={() => toggleCardSelection(card.id)}
                         disabled={(!isMyTurn && !isFavorVictim) || isExploding}
                         className={`${isSelected ? 'ring-2 ring-orange-500 shadow-[0_0_40px_rgba(249,115,22,0.5)]' : ''} ${isFavorVictim ? 'ring-2 ring-purple-500 shadow-[0_0_20px_rgba(168,85,247,0.4)] animate-pulse' : ''}`}
                       />
@@ -558,7 +648,47 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
         )}
       </div>
 
-      </AnimatePresence>
+      {/* Fixed Floating Quick-Play Nope Button */}
+      {gameState.status === 'PLAYING' && !myPlayer?.isEliminated && (
+        <div className="fixed bottom-36 right-8 z-[80] flex flex-col items-center gap-2 pointer-events-auto">
+          {(() => {
+            const nopeCard = myPlayer?.hand?.find(c => c.type === CardType.NOPE);
+            const isWindowActive = !!gameState.actionWindow && !(gameState.actionWindow.initiatorId === socketId && gameState.actionWindow.nopeCount === 0) && gameState.actionWindow.lastNoperId !== socketId;
+            
+            let btnStyle = "";
+            let statusText = "STANDBY";
+            let clickHandler = () => {};
+            let isBtnDisabled = true;
+
+            if (!nopeCard) {
+              btnStyle = "bg-slate-900/40 text-slate-600 border border-slate-800 cursor-not-allowed opacity-50";
+              statusText = "NO NOPE";
+            } else if (isWindowActive) {
+              btnStyle = "bg-red-600 hover:bg-red-500 text-white shadow-[0_0_40px_rgba(220,38,38,0.8)] border border-red-500 scale-110 active:scale-95 animate-pulse cursor-pointer";
+              statusText = "PLAY NOPE!";
+              clickHandler = () => onAction({ type: 'PLAY_NOPE', cardId: nopeCard.id });
+              isBtnDisabled = false;
+            } else {
+              btnStyle = "bg-red-950/20 hover:bg-red-950/40 text-red-400 border border-red-900/50 cursor-pointer shadow-[0_0_20px_rgba(220,38,38,0.1)]";
+              statusText = "NOPE READY";
+              clickHandler = () => alert("Wait for an action to Nope!");
+              isBtnDisabled = false;
+            }
+
+            return (
+              <motion.button
+                whileHover={!isBtnDisabled ? { scale: 1.05 } : {}}
+                whileTap={!isBtnDisabled ? { scale: 0.95 } : {}}
+                onClick={clickHandler}
+                className={`w-20 h-20 sm:w-24 sm:h-24 rounded-full flex flex-col items-center justify-center font-black uppercase transition-all duration-300 ${btnStyle}`}
+              >
+                <span className="text-sm sm:text-base tracking-tighter">NOPE!</span>
+                <span className="text-[7px] sm:text-[9px] font-bold opacity-75 mt-1">{statusText}</span>
+              </motion.button>
+            );
+          })()}
+        </div>
+      )}
     </div>
   );
 };

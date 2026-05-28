@@ -1,6 +1,6 @@
-import { Game } from './Game';
+import { Game } from './Game.js';
 import { askAIForMove, BotDecision } from '../services/ai-service.js';
-import { CardType, PlayerAction } from '../../../shared/src/types';
+import { CardType, PlayerAction } from '../../../shared/src/types.js';
 
 export class AIBotController {
   private game: Game;
@@ -9,7 +9,7 @@ export class AIBotController {
     this.game = game;
   }
 
-  async takeTurn(botId: string, difficulty: 'EASY' | 'MEDIUM' | 'HARD', requiresDefuse: boolean = false): Promise<PlayerAction> {
+  async takeTurn(botId: string, difficulty: 'EASY' | 'MEDIUM' | 'HARD' | 'PLAY_WITH_GEMINI', requiresDefuse: boolean = false): Promise<PlayerAction> {
     const player = this.game.players.find(p => p.id === botId);
     if (!player) throw new Error("Bot player not found");
 
@@ -19,8 +19,10 @@ export class AIBotController {
       return { type: 'GIVE_CARD', requesterId: this.game.waitingForFavor.requesterId, cardId: weakestCardId };
     }
 
-    if (difficulty === 'HARD') {
-      return this.takeHardTurn(botId, requiresDefuse);
+    if (difficulty === 'PLAY_WITH_GEMINI') {
+      return this.takeGeminiTurn(botId, requiresDefuse);
+    } else if (difficulty === 'HARD') {
+      return this.takeHardRuleTurn(botId, requiresDefuse);
     } else if (difficulty === 'MEDIUM') {
       return this.takeMediumTurn(botId, requiresDefuse);
     } else {
@@ -82,7 +84,7 @@ export class AIBotController {
       const cardToPlay = actionCards[Math.floor(Math.random() * actionCards.length)];
       
       let targetId;
-      if ([CardType.FAVOR].includes(cardToPlay.type)) {
+      if (cardToPlay.type === CardType.FAVOR) {
         const opponents = this.game.players.filter(p => p.id !== botId && !p.isEliminated && p.handCount > 0);
         if (opponents.length > 0) {
           targetId = opponents[Math.floor(Math.random() * opponents.length)].id;
@@ -120,75 +122,85 @@ export class AIBotController {
       return { type: 'DEFUSE', insertIndex };
     }
 
-    // 1. Memory Defense: If a bomb is known to be in the range of cards we must draw
+    const remainingCards = this.game.drawPile.length;
+    const isEndGame = remainingCards <= 10;
+
+    // Check memory for bomb
     const bombInRangeIndex = player.knownDeckTop.findIndex((c: any, idx: number) => 
       c.cardType === CardType.EXPLODING_KITTEN && idx < player.turnsToPlay
     );
-    
-    if (bombInRangeIndex !== -1) {
-      console.log(`[AIBot - Medium] Bot ${player.name} knows a bomb is coming at draw index ${bombInRangeIndex}! Trying to play defense...`);
-      // Play Skip or Attack to avoid drawing
-      const skipOrAttack = player.hand.find(c => c.type === CardType.SKIP || c.type === CardType.ATTACK);
+    const isBombKnown = bombInRangeIndex !== -1;
+
+    // Check suspicion (someone recently defused and we are in draw range)
+    const lastDefuse = (this.game as any).lastDefuseAction;
+    const isBombSuspected = lastDefuse && lastDefuse.playerId !== botId && lastDefuse.drawsSinceDefuse === 0;
+
+    const isTopCardSafe = player.knownDeckTop.length > 0 && player.knownDeckTop[0].cardType !== CardType.EXPLODING_KITTEN;
+    const isBombDanger = (isBombKnown || isBombSuspected) && !isTopCardSafe;
+
+    const skipOrAttack = player.hand.find(c => c.type === CardType.SKIP || c.type === CardType.ATTACK);
+    const seeFutureCard = player.hand.find(c => c.type === CardType.SEE_THE_FUTURE);
+    const shuffleCard = player.hand.find(c => c.type === CardType.SHUFFLE);
+    const favorCard = player.hand.find(c => c.type === CardType.FAVOR);
+
+    // If top card is safe, save cards and draw!
+    if (isTopCardSafe) {
+      console.log(`[AIBot - Medium] Top card is safe. Saving cards and drawing.`);
+      return { type: 'DRAW_CARD' };
+    }
+
+    // Defensive check (bomb danger or attacked with turns to play)
+    if (isBombDanger || player.turnsToPlay > 1) {
       if (skipOrAttack) {
+        console.log(`[AIBot - Medium] Bot ${player.name} playing defense skip/attack under danger/attack.`);
         return { type: 'PLAY_CARDS', cardIds: [skipOrAttack.id] };
       }
-      // Play Shuffle to randomize the bomb's position
-      const shuffleCard = player.hand.find(c => c.type === CardType.SHUFFLE);
       if (shuffleCard) {
+        console.log(`[AIBot - Medium] Bot ${player.name} playing shuffle under danger.`);
         return { type: 'PLAY_CARDS', cardIds: [shuffleCard.id] };
       }
     }
 
-    // 2. Defensive check if being attacked (but no known bomb is immediate)
-    if (player.turnsToPlay > 1) {
-      const defenseCard = player.hand.find(c => c.type === CardType.SKIP || c.type === CardType.ATTACK);
-      if (defenseCard) {
-        return { type: 'PLAY_CARDS', cardIds: [defenseCard.id] };
-      }
-    }
-
-    // 3. Play See The Future or Shuffle under appropriate conditions
-    const seeFutureCard = player.hand.find(c => c.type === CardType.SEE_THE_FUTURE);
-    if (seeFutureCard && (this.game.drawPile.length <= 10 || Math.random() > 0.7)) {
+    // Play See The Future - save for late game or when danger is present
+    if (seeFutureCard && (isEndGame || Math.random() > 0.8)) {
+      console.log(`[AIBot - Medium] Playing See The Future.`);
       return { type: 'PLAY_CARDS', cardIds: [seeFutureCard.id] };
     }
 
-    const shuffleCard = player.hand.find(c => c.type === CardType.SHUFFLE);
-    if (shuffleCard) {
-      // Don't shuffle if we know the top card is safe!
-      const topCardIsSafe = player.knownDeckTop.length > 0 && player.knownDeckTop[0].cardType !== CardType.EXPLODING_KITTEN;
-      if (!topCardIsSafe && (this.game.drawPile.length <= 10 || Math.random() > 0.8)) {
-        return { type: 'PLAY_CARDS', cardIds: [shuffleCard.id] };
+    // Play Shuffle if we don't know the deck top and it's late game
+    if (shuffleCard && isEndGame && !isTopCardSafe && Math.random() > 0.8) {
+      console.log(`[AIBot - Medium] Playing Shuffle preventative.`);
+      return { type: 'PLAY_CARDS', cardIds: [shuffleCard.id] };
+    }
+
+    // Combos / Stealing (Favor / Pairs) - play them anytime (especially mid game to build hand, or late game to steal)
+    const opponents = this.game.players.filter(p => p.id !== botId && !p.isEliminated && p.handCount > 0);
+    const target = opponents.length > 0 ? opponents[Math.floor(Math.random() * opponents.length)] : null;
+
+    if (target) {
+      // Pairs
+      const counts: Record<string, string[]> = {};
+      player.hand.forEach(c => {
+        if (!counts[c.type]) counts[c.type] = [];
+        counts[c.type].push(c.id);
+      });
+      const pairType = Object.keys(counts).find(type => counts[type].length >= 2);
+      if (pairType && Math.random() > 0.5) {
+        console.log(`[AIBot - Medium] Playing Pair on ${target.name}.`);
+        return { type: 'PLAY_CARDS', cardIds: counts[pairType].slice(0, 2), targetId: target.id };
       }
-    }
 
-    // 4. Strategic Favor: Play Favor to steal
-    const favorCard = player.hand.find(c => c.type === CardType.FAVOR);
-    if (favorCard && Math.random() > 0.6) {
-      const opponents = this.game.players.filter(p => p.id !== botId && !p.isEliminated && p.handCount > 0);
-      const targetId = opponents.length > 0 ? opponents[Math.floor(Math.random() * opponents.length)].id : undefined;
-      if (targetId) return { type: 'PLAY_CARDS', cardIds: [favorCard.id], targetId };
-    }
-
-    // 5. Combos: Check for pairs
-    const counts: Record<string, string[]> = {};
-    player.hand.forEach(c => {
-      if (!counts[c.type]) counts[c.type] = [];
-      counts[c.type].push(c.id);
-    });
-    const pairType = Object.keys(counts).find(type => counts[type].length >= 2);
-    if (pairType && Math.random() > 0.5) {
-      const opponents = this.game.players.filter(p => p.id !== botId && !p.isEliminated && p.handCount > 0);
-      const pairTargetId = opponents.length > 0 ? opponents[Math.floor(Math.random() * opponents.length)].id : undefined;
-      if (pairTargetId) {
-        return { type: 'PLAY_CARDS', cardIds: counts[pairType].slice(0, 2), targetId: pairTargetId };
+      // Favor
+      if (favorCard && Math.random() > 0.6) {
+        console.log(`[AIBot - Medium] Playing Favor on ${target.name}.`);
+        return { type: 'PLAY_CARDS', cardIds: [favorCard.id], targetId: target.id };
       }
     }
 
     return { type: 'DRAW_CARD' };
   }
 
-  private async takeHardTurn(botId: string, requiresDefuse: boolean): Promise<PlayerAction> {
+  private async takeGeminiTurn(botId: string, requiresDefuse: boolean): Promise<PlayerAction> {
     const player = this.game.players.find(p => p.id === botId)!;
     
     // OPTIMIZATION: If not forced to Defuse, and has no playable action cards or pairs, draw automatically to save quota
@@ -244,7 +256,7 @@ ${knownTop}
          return { type: 'DEFUSE', insertIndex: pos };
       }
       if (decision.action === 'PLAY_CARDS' && decision.cardIds && decision.cardIds.length > 0) {
-         return { type: 'PLAY_CARDS', cardIds: decision.cardIds, targetId: decision.targetId, requestedCardType: decision.requestedCardType };
+         return { type: 'PLAY_CARDS', cardIds: decision.cardIds, targetId: decision.targetId, requestedCardType: decision.requestedCardType as CardType | undefined };
       }
       if (decision.action === 'DRAW_CARD' && !requiresDefuse) {
          return { type: 'DRAW_CARD' };
@@ -254,5 +266,248 @@ ${knownTop}
     // Fallback if AI Service fails or returns invalid action
     console.log("[AIBot] AI Service failed or timed out, falling back to Medium logic.");
     return this.takeMediumTurn(botId, requiresDefuse);
+  }
+
+  public async takeNopeDecision(botId: string, difficulty: 'EASY' | 'MEDIUM' | 'HARD' | 'PLAY_WITH_GEMINI'): Promise<PlayerAction | null> {
+    const player = this.game.players.find(p => p.id === botId);
+    if (!player || !this.game.pendingAction) return null;
+
+    const nopeCard = player.hand.find(c => c.type === CardType.NOPE);
+    if (!nopeCard) return null;
+
+    const action = this.game.pendingAction;
+
+    // Critical guard: Do not Nope your own actions unless they are currently Noped by someone else (counter-Nope / Yup)
+    if (action.playerId === botId) {
+      if (action.nopeCount % 2 !== 0 && (difficulty === 'HARD' || difficulty === 'PLAY_WITH_GEMINI')) {
+        return { type: 'PLAY_NOPE', cardId: nopeCard.id };
+      }
+      return null;
+    }
+
+    // If the action is already noped, playing a Nope would counter-nope it (enabling it).
+    // We only want to Nope if the action is currently active/successful (nopeCount % 2 === 0).
+    if (action.nopeCount % 2 !== 0) {
+      return null;
+    }
+
+    const isTargeted = action.targetId === botId;
+    const isAttacked = action.cards[0]?.type === CardType.ATTACK;
+
+    // Base logic: If attacked or targeted by steal/favor, Nope it!
+    if (isTargeted || isAttacked) {
+      if (Math.random() > 0.2) return { type: 'PLAY_NOPE', cardId: nopeCard.id };
+    }
+
+    // Advanced logic (Hard/Gemini)
+    if (difficulty === 'HARD' || difficulty === 'PLAY_WITH_GEMINI') {
+      // If opponent plays See The Future or Shuffle, and we want to ruin it
+      if ((action.cards[0]?.type === CardType.SEE_THE_FUTURE || action.cards[0]?.type === CardType.SHUFFLE) && Math.random() > 0.7) {
+         return { type: 'PLAY_NOPE', cardId: nopeCard.id };
+      }
+    }
+
+    return null;
+  }
+
+  private takeHardRuleTurn(botId: string, requiresDefuse: boolean): PlayerAction {
+    const player = this.game.players.find(p => p.id === botId)!;
+
+    // --- 0. HANDLE DEFUSE REQUIRED ---
+    if (requiresDefuse) {
+      let nextIndex = (this.game.currentPlayerIndex + 1) % this.game.players.length;
+      while (this.game.players[nextIndex].isEliminated) {
+        nextIndex = (nextIndex + 1) % this.game.players.length;
+      }
+      const nextPlayer = this.game.players[nextIndex];
+      const hasDefuse = nextPlayer.hasDefuse();
+      
+      // If the next player has no Defuse, place bomb on top (index 0) to eliminate them immediately!
+      if (!hasDefuse) {
+        console.log(`[AIBot - Hard] Bot ${player.name} placing bomb at index 0 to eliminate defuse-less ${nextPlayer.name}!`);
+        return { type: 'DEFUSE', insertIndex: 0 };
+      } else {
+        // Next player has defuse. Try to place it strategically.
+        let insertIndex = 0;
+        if (nextPlayer.turnsToPlay > 1) {
+          insertIndex = Math.random() > 0.4 ? 1 : 0;
+        } else {
+          const rand = Math.random();
+          if (rand < 0.6) {
+            insertIndex = 0; // Put it on top (60% chance)
+          } else if (rand < 0.9) {
+            insertIndex = 1; // Put it second card (30% chance)
+          } else {
+            insertIndex = Math.min(2, this.game.drawPile.length); // Put it third card (10% chance)
+          }
+        }
+        console.log(`[AIBot - Hard] Bot ${player.name} placing bomb at index ${insertIndex} against defuse-carrying ${nextPlayer.name}.`);
+        return { type: 'DEFUSE', insertIndex };
+      }
+    }
+
+    // --- 1. CORE VARIABLES & STATE ANALYSIS ---
+    const remainingCards = this.game.drawPile.length;
+    const isEndGame = remainingCards <= 8; // End game phase
+    const isMidGame = remainingCards > 8;
+
+    // Check if we know exactly where a bomb is from See the Future
+    const bombInRangeIndex = player.knownDeckTop.findIndex((c: any, idx: number) => 
+      c.cardType === CardType.EXPLODING_KITTEN && idx < player.turnsToPlay
+    );
+    const isBombKnown = bombInRangeIndex !== -1;
+
+    // Check if we suspect a bomb (e.g. someone recently defused and we are in the draw range of the suspicion window)
+    const lastDefuse = (this.game as any).lastDefuseAction;
+    const isBombSuspected = lastDefuse && 
+                            lastDefuse.playerId !== botId && 
+                            lastDefuse.drawsSinceDefuse < 3;
+
+    // Top card status from memory
+    const isTopCardSafe = player.knownDeckTop.length > 0 && 
+                          player.knownDeckTop[0].cardType !== CardType.EXPLODING_KITTEN;
+
+    // Bomb danger flag
+    let isBombDanger = (isBombKnown || isBombSuspected) && !isTopCardSafe;
+
+    // --- 2. GATHER AVAILABLE CARDS IN HAND ---
+    const hand = player.hand;
+    const attackCard = hand.find(c => c.type === CardType.ATTACK);
+    const skipCard = hand.find(c => c.type === CardType.SKIP);
+    const seeFutureCard = hand.find(c => c.type === CardType.SEE_THE_FUTURE);
+    const shuffleCard = hand.find(c => c.type === CardType.SHUFFLE);
+    const favorCard = hand.find(c => c.type === CardType.FAVOR);
+
+    // Group cat cards / pairs
+    const counts: Record<string, string[]> = {};
+    hand.forEach(c => {
+      if (!counts[c.type]) counts[c.type] = [];
+      counts[c.type].push(c.id);
+    });
+    const pairType = Object.keys(counts).find(type => counts[type].length >= 2);
+
+    // Find opponents
+    const opponents = this.game.players.filter(p => p.id !== botId && !p.isEliminated);
+    const richestOpponent = opponents.reduce((prev, current) => (prev.handCount > current.handCount) ? prev : current, opponents[0]);
+
+    // --- 3. DECISION-MAKING FLOW ---
+
+    // Case 3a: We know top card is SAFE. Do NOT play any defensive/high-value cards. Just draw!
+    if (isTopCardSafe) {
+      console.log(`[AIBot - Hard] Bot ${player.name} knows top card is safe. Saving cards and drawing.`);
+      return { type: 'DRAW_CARD' };
+    }
+
+    // Case 3b: Imminent/Suspected Bomb Danger
+    if (isBombDanger) {
+      console.log(`[AIBot - Hard] Bot ${player.name} detects bomb danger (Known: ${isBombKnown}, Suspected: ${isBombSuspected}).`);
+
+      // 1. If we suspect a bomb but don't know for sure, try to verify using See The Future first!
+      if (isBombSuspected && !isBombKnown && seeFutureCard && player.knownDeckTop.length === 0) {
+        console.log(`[AIBot - Hard] Playing See The Future to verify the suspected bomb.`);
+        return { type: 'PLAY_CARDS', cardIds: [seeFutureCard.id] };
+      }
+
+      // 2. Play Skip or Attack to avoid drawing the bomb.
+      // Prioritize Attack if the opponent has no Defuse card (lethal pressure) or if we have multiple attacks.
+      if (attackCard || skipCard) {
+        const opponentHasNoDefuse = richestOpponent && !richestOpponent.hasDefuse();
+        if (attackCard && (opponentHasNoDefuse || !skipCard)) {
+          console.log(`[AIBot - Hard] Playing Attack to bypass bomb and target ${richestOpponent?.name}.`);
+          return { type: 'PLAY_CARDS', cardIds: [attackCard.id] };
+        }
+        if (skipCard) {
+          console.log(`[AIBot - Hard] Playing Skip to bypass bomb.`);
+          return { type: 'PLAY_CARDS', cardIds: [skipCard.id] };
+        }
+      }
+
+      // 3. Play Shuffle to randomize the deck since we have no Skip/Attack.
+      if (shuffleCard) {
+        console.log(`[AIBot - Hard] No skip/attack available. Playing Shuffle to randomize bomb.`);
+        return { type: 'PLAY_CARDS', cardIds: [shuffleCard.id] };
+      }
+
+      // 4. Try to steal a defense card (Attack/Skip/Defuse) using Favor or Pairs.
+      if (richestOpponent && richestOpponent.handCount > 0) {
+        if (pairType) {
+          console.log(`[AIBot - Hard] Playing Pair on ${richestOpponent.name} to steal defense.`);
+          return { type: 'PLAY_CARDS', cardIds: counts[pairType].slice(0, 2), targetId: richestOpponent.id };
+        }
+        if (favorCard) {
+          console.log(`[AIBot - Hard] Playing Favor on ${richestOpponent.name} to request defense.`);
+          return { type: 'PLAY_CARDS', cardIds: [favorCard.id], targetId: richestOpponent.id };
+        }
+      }
+    }
+
+    // Case 3c: End Game Phase (Deck <= 8 cards) - Risk is generally high even if no specific bomb is suspected yet.
+    if (isEndGame) {
+      console.log(`[AIBot - Hard] Bot ${player.name} is in End Game (draw pile: ${remainingCards}). Playing tactically.`);
+
+      // 1. Play See The Future to inspect what's coming before making decisions.
+      if (seeFutureCard && player.knownDeckTop.length === 0) {
+        console.log(`[AIBot - Hard] End Game: Playing See The Future to inspect top cards.`);
+        return { type: 'PLAY_CARDS', cardIds: [seeFutureCard.id] };
+      }
+
+      // 2. Play high-value defensive cards if we have to draw and don't know if it's safe (preventative defense)
+      if (player.turnsToPlay > 1 || Math.random() > 0.4) {
+        if (skipCard) {
+          console.log(`[AIBot - Hard] End Game: Playing Skip preventatively.`);
+          return { type: 'PLAY_CARDS', cardIds: [skipCard.id] };
+        }
+        if (attackCard) {
+          console.log(`[AIBot - Hard] End Game: Playing Attack preventatively.`);
+          return { type: 'PLAY_CARDS', cardIds: [attackCard.id] };
+        }
+      }
+
+      // 3. Strategic stealing to strip opponent's defenses in the final phase
+      if (richestOpponent && richestOpponent.handCount > 0) {
+        if (pairType && Math.random() > 0.6) {
+          console.log(`[AIBot - Hard] End Game: Playing Pair on ${richestOpponent.name} to strip defense.`);
+          return { type: 'PLAY_CARDS', cardIds: counts[pairType].slice(0, 2), targetId: richestOpponent.id };
+        }
+        if (favorCard && Math.random() > 0.6) {
+          console.log(`[AIBot - Hard] End Game: Playing Favor on ${richestOpponent.name} to strip defense.`);
+          return { type: 'PLAY_CARDS', cardIds: [favorCard.id], targetId: richestOpponent.id };
+        }
+      }
+    }
+
+    // Case 3d: Early/Mid Game Phase (Deck > 8 cards) - Save valuable cards!
+    if (isMidGame) {
+      // 1. Use Favor and Pairs early to build hand size and steal opponent's cards.
+      // This is a great way to build resources for the end game.
+      if (richestOpponent && richestOpponent.handCount > 0 && player.handCount > 3) {
+        if (pairType && Math.random() > 0.4) {
+          console.log(`[AIBot - Hard] Mid Game: Playing Pair on ${richestOpponent.name} strategically.`);
+          return { type: 'PLAY_CARDS', cardIds: counts[pairType].slice(0, 2), targetId: richestOpponent.id };
+        }
+        if (favorCard && Math.random() > 0.5) {
+          console.log(`[AIBot - Hard] Mid Game: Playing Favor on ${richestOpponent.name} strategically.`);
+          return { type: 'PLAY_CARDS', cardIds: [favorCard.id], targetId: richestOpponent.id };
+        }
+      }
+
+      // 2. Do NOT play Attack, Skip, or See The Future unless we have an excess of them (e.g. > 2 skips, or > 2 attacks)
+      // to keep them for the critical end game.
+      const attacks = hand.filter(c => c.type === CardType.ATTACK);
+      const skips = hand.filter(c => c.type === CardType.SKIP);
+      
+      if (attacks.length >= 2 && Math.random() > 0.7) {
+        console.log(`[AIBot - Hard] Mid Game: Playing excess Attack.`);
+        return { type: 'PLAY_CARDS', cardIds: [attacks[0].id] };
+      }
+      if (skips.length >= 2 && Math.random() > 0.7) {
+        console.log(`[AIBot - Hard] Mid Game: Playing excess Skip.`);
+        return { type: 'PLAY_CARDS', cardIds: [skips[0].id] };
+      }
+    }
+
+    // Default action: Draw a card to end the turn and build the hand.
+    console.log(`[AIBot - Hard] Bot ${player.name} drawing card safely.`);
+    return { type: 'DRAW_CARD' };
   }
 }

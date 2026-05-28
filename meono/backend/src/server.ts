@@ -3,7 +3,7 @@ import http from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import { GameGateway } from './socket/GameGateway';
+import { GameGateway } from './socket/GameGateway.js';
 
 dotenv.config();
 

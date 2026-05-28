@@ -23,7 +23,7 @@ export function useGameState() {
     };
   }, []);
 
-  const joinMatch = (name: string, difficulty: 'EASY' | 'MEDIUM' | 'HARD', botCount: number) => {
+  const joinMatch = (name: string, difficulty: 'EASY' | 'MEDIUM' | 'HARD' | 'PLAY_WITH_GEMINI', botCount: number) => {
     if (socket) {
       setPlayerName(name);
       socket.emit('join_match', { name, difficulty, botCount });

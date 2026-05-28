@@ -1,4 +1,4 @@
-import { Card, CardType } from '../../../shared/src/types';
+import { Card, CardType } from '../../../shared/src/types.js';
 
 export class Player {
   public id: string;

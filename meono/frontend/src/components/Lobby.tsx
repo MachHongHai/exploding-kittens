@@ -1,12 +1,12 @@
 import React, { useState } from 'react';
 
 interface LobbyProps {
-  onJoin: (name: string, difficulty: 'EASY' | 'MEDIUM' | 'HARD', botCount: number) => void;
+  onJoin: (name: string, difficulty: 'EASY' | 'MEDIUM' | 'HARD' | 'PLAY_WITH_GEMINI', botCount: number) => void;
 }
 
 export const Lobby: React.FC<LobbyProps> = ({ onJoin }) => {
   const [name, setName] = useState('');
-  const [difficulty, setDifficulty] = useState<'EASY' | 'MEDIUM' | 'HARD'>('MEDIUM');
+  const [difficulty, setDifficulty] = useState<'EASY' | 'MEDIUM' | 'HARD' | 'PLAY_WITH_GEMINI'>('MEDIUM');
   const [botCount, setBotCount] = useState(3);
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -67,7 +67,7 @@ export const Lobby: React.FC<LobbyProps> = ({ onJoin }) => {
               Bot Intelligence
             </label>
             <div className="flex flex-col gap-3">
-              {(['EASY', 'MEDIUM', 'HARD'] as const).map((level) => (
+              {(['EASY', 'MEDIUM', 'HARD', 'PLAY_WITH_GEMINI'] as const).map((level) => (
                 <button
                   key={level}
                   type="button"

@@ -29,10 +29,13 @@ IMPORTANT RULES:
 - If playing a FAVOR or a Pair (2 cards of same type), provide the 'targetId' of an opponent.
 
 TACTICAL INSIGHTS:
+- SAVING VALUABLE CARDS: Save high-value cards like ATTACK, SKIP, and SEE_THE_FUTURE for the end game (when the draw pile is small, e.g., under 8 cards) or when you suspect/know a bomb is coming. Do not waste them early on unless you are forced to.
 - MEMORY OF TOP CARDS: Pay attention to the "Cards you know at the top of the draw pile" in the game state.
-- If you know an Exploding Kitten is coming up in the range of cards you are forced to draw (based on 'Your turns to play'), you MUST play a defense card like SKIP, ATTACK, or SHUFFLE immediately to avoid drawing it and exploding!
-- If you know the top card is safe, do NOT play SKIP, ATTACK, or SHUFFLE unless you have a strong tactical reason. Just DRAW_CARD to save your cards!
-- SHUFFLING: Only play SHUFFLE if you know a bomb is on top, or if you suspect there is a bomb and have no other way to skip drawing. Don't shuffle if you know the top card is a good/safe card.
+- BOMB DANGER PRIORITY: If you know an Exploding Kitten is coming up in the range of cards you are forced to draw (based on 'Your turns to play'), or you suspect a bomb is on top, prioritize your play in this order:
+  1. SKIP or ATTACK: Play them immediately to avoid drawing. (Prefer ATTACK to pressure opponent if they have no Defuse card).
+  2. SEE_THE_FUTURE: If you suspect a bomb but don't know for sure, use this to inspect the top first. If safe, you can save your skip/attack and just draw.
+  3. SHUFFLE: Only play SHUFFLE if you know a bomb is on top, or if you suspect there is a bomb and have no Skip or Attack. Don't shuffle if you know the top card is a safe/good card.
+  4. FAVOR or PAIRS: Try to steal a defense card from opponents.
 - DEFUSING: If 'Requires Defuse right now' is YES, choose 'action': 'DEFUSE'.
   - Choose 'insertIndex' carefully (0 means top of the deck, 1 means 1 card below top, etc.).
   - If the next player has no Defuse card, place the bomb at position 0 to eliminate them immediately!
