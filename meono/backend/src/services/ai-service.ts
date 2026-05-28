@@ -12,11 +12,11 @@ export interface BotDecision {
   reasoning: string;
 }
 
-const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent';
+// Call a specific Gemini model
+async function askGemini(modelName: string, gameStateDescription: string, handCards: any[], apiKey: string): Promise<BotDecision | null> {
+  console.log(`[AI Service] Calling ${modelName} with key: ...${apiKey.slice(-6)}`);
 
-// Call Gemini 2.5 Flash (Free Tier)
-async function askGemini(gameStateDescription: string, handCards: any[], apiKey: string): Promise<BotDecision | null> {
-  console.log(`[AI Service] Calling Gemini 2.5 Flash (Free) with key: ...${apiKey.slice(-6)}`);
+  const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent`;
 
   const prompt = `You are an expert AI playing the game Exploding Kittens. 
 Your goal is to survive and eliminate other players.
@@ -91,7 +91,7 @@ Only "action" and "reasoning" are required. Omit other fields if not relevant.`;
   };
 
   try {
-    const response = await fetch(GEMINI_API_URL, {
+    const response = await fetch(apiUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -102,27 +102,27 @@ Only "action" and "reasoning" are required. Omit other fields if not relevant.`;
 
     if (!response.ok) {
       const errorBody = await response.text();
-      console.error(`[AI Service] Gemini HTTP ${response.status}: ${errorBody}`);
+      console.warn(`[AI Service] Gemini model ${modelName} returned HTTP ${response.status}: ${errorBody.substring(0, 300)}`);
       return null;
     }
 
     const data = await response.json();
     const textResult = data.candidates?.[0]?.content?.parts?.[0]?.text;
     if (!textResult) {
-      console.error("[AI Service] No text in response:", JSON.stringify(data, null, 2));
+      console.warn(`[AI Service] No text in response for ${modelName}:`, JSON.stringify(data, null, 2));
       return null;
     }
 
     const decision: BotDecision = JSON.parse(textResult);
-    console.log(`[AI Service - Gemini] ${decision.action} - ${decision.reasoning}`);
+    console.log(`[AI Service - ${modelName}] ${decision.action} - ${decision.reasoning}`);
     return decision;
   } catch (error: any) {
-    console.error("[AI Service] Gemini error:", error?.message || error);
+    console.warn(`[AI Service] Gemini error on model ${modelName}:`, error?.message || error);
     return null;
   }
 }
 
-// Unified call function - Gemini only
+// Unified call function - Gemini only with fallback strategy
 export async function askAIForMove(gameStateDescription: string, handCards: any[]): Promise<BotDecision | null> {
   const geminiKey = process.env.GEMINI_API_KEY?.trim();
 
@@ -131,5 +131,21 @@ export async function askAIForMove(gameStateDescription: string, handCards: any[
     return null;
   }
 
-  return askGemini(gameStateDescription, handCards, geminiKey);
+  // Fallback chain to ensure we always get a decision, even if some models are rate-limited
+  const models = [
+    'gemini-2.5-flash-lite',
+    'gemini-3.5-flash',
+    'gemini-2.5-flash'
+  ];
+
+  for (const model of models) {
+    const decision = await askGemini(model, gameStateDescription, handCards, geminiKey);
+    if (decision) {
+      return decision;
+    }
+    console.warn(`[AI Service] Fallback model ${model} failed, trying next...`);
+  }
+
+  console.error("[AI Service] All fallback Gemini models failed.");
+  return null;
 }
