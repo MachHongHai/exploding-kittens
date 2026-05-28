@@ -48,12 +48,21 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
   const favorRequester = gameState.players.find(p => p.id === gameState.waitingForFavor?.requesterId);
   const favorVictim = gameState.players.find(p => p.id === gameState.waitingForFavor?.victimId);
 
-  // Theft animation logic (for when I'M being stolen from)
-  const isBeingStolenFrom = gameState.lastTheft?.victimId === socketId;
+  // Theft animation logic (for when I'M being stolen from BLINDLY via Pairs)
+  const isBeingStolenFrom = gameState.lastTheft?.victimId === socketId && !gameState.waitingForFavor;
   const stolenCardId = gameState.lastTheft?.cardId;
 
   const toggleCardSelection = (cardId: string) => {
-    if (!isMyTurn || isExploding || isStealer || isSeeingFuture || isFavorVictim) return;
+    if (isExploding || isStealer || isSeeingFuture) return;
+    
+    // If being asked for a favor, select the card to give
+    if (isFavorVictim) {
+      setSelectedCardIds([cardId]); // Only one card for favor
+      return;
+    }
+
+    if (!isMyTurn) return;
+
     setSelectedCardIds(prev => 
       prev.includes(cardId) ? prev.filter(id => id !== cardId) : [...prev, cardId]
     );
@@ -64,13 +73,76 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
     onAction({ type: 'STEAL_CARD', victimId, cardIndex });
   };
 
-  const handleGiveCard = (cardId: string) => {
-    if (!isFavorVictim || !gameState.waitingForFavor) return;
-    onAction({ type: 'GIVE_CARD', requesterId: gameState.waitingForFavor.requesterId, cardId });
+  const handleGiveCard = () => {
+    if (!isFavorVictim || !gameState.waitingForFavor || selectedCardIds.length === 0) return;
+    onAction({ type: 'GIVE_CARD', requesterId: gameState.waitingForFavor.requesterId, cardId: selectedCardIds[0] });
+    setSelectedCardIds([]);
   };
 
   const handleConfirmFuture = () => {
     onAction({ type: 'CONFIRM_FUTURE' });
+  };
+
+  const renderFavorOverlay = () => {
+    if (!isFavorVictim || !favorRequester) return null;
+    const selectedCard = myPlayer?.hand?.find(c => c.id === selectedCardIds[0]);
+
+    return (
+      <motion.div 
+        initial={{ opacity: 0 }} 
+        animate={{ opacity: 1 }} 
+        className="absolute inset-0 bg-black/90 backdrop-blur-3xl z-40 flex flex-col items-center justify-center p-8"
+        onPointerUp={() => {
+          if (isDragging && selectedCardIds.length > 0) handleGiveCard();
+          setIsDragging(false);
+        }}
+      >
+          <motion.div initial={{ y: -50 }} animate={{ y: 0 }} className="text-center mb-12">
+            <h2 className="text-5xl font-black text-purple-400 mb-2 uppercase tracking-tighter italic">
+              FAVOR REQUESTED
+            </h2>
+            <p className="text-slate-300 font-bold uppercase tracking-[0.2em] text-sm">
+              Give <span className="text-white bg-purple-500/30 px-3 py-1 rounded-lg border border-purple-500/50 ml-1">{favorRequester.name}</span> a card
+            </p>
+          </motion.div>
+
+          {/* THE CAT PAW - The Drop Zone */}
+          <div className="relative mb-20">
+             <motion.div 
+                animate={isDragging ? { scale: 1.1, rotate: [0, -2, 2, 0] } : { scale: 1 }}
+                className={`w-64 h-64 rounded-full flex items-center justify-center border-4 border-dashed transition-all duration-500 ${isDragging ? 'border-purple-400 bg-purple-500/10 shadow-[0_0_80px_rgba(168,85,247,0.3)]' : 'border-white/10 bg-white/5'}`}
+             >
+                <div className="flex flex-col items-center gap-4 text-white/20 uppercase font-black tracking-widest text-center">
+                   <span className="text-8xl filter grayscale opacity-50 drop-shadow-2xl">🐾</span>
+                   <span className="text-[10px]">Drop Card Here</span>
+                </div>
+             </motion.div>
+             
+             {/* Paw reaching from top animation */}
+             <motion.div 
+                initial={{ y: -300 }} 
+                animate={{ y: isDragging ? -20 : -40 }} 
+                className="absolute -top-12 left-1/2 -translate-x-1/2 pointer-events-none"
+             >
+                <span className="text-9xl filter drop-shadow-2xl">🐈</span>
+             </motion.div>
+          </div>
+
+          <AnimatePresence>
+            {selectedCardIds.length > 0 && (
+              <motion.div initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 20, opacity: 0 }} className="flex flex-col items-center gap-6">
+                <button 
+                  onClick={handleGiveCard}
+                  className="bg-purple-600 hover:bg-purple-500 text-white font-black px-12 py-5 rounded-full text-xl shadow-[0_0_50px_rgba(168,85,247,0.5)] uppercase tracking-[0.2em] transition-all hover:scale-105 active:scale-95"
+                >
+                  Give "{selectedCard?.name}"
+                </button>
+                <span className="text-[10px] text-purple-400 font-bold uppercase tracking-[0.3em] animate-pulse">or drag into the paw</span>
+              </motion.div>
+            )}
+          </AnimatePresence>
+      </motion.div>
+    );
   };
 
   const handlePlayCombo = (requestedCardType?: CardType) => {
@@ -332,6 +404,20 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
       )}
 
       {/* Explosions & Alerts */}
+      {gameState.waitingForDefuse && gameState.waitingForDefuse !== socketId && (
+        <div className="absolute top-32 left-1/2 -translate-x-1/2 z-30 bg-red-600/20 border border-red-500/50 backdrop-blur-xl px-6 py-3 rounded-2xl flex items-center gap-4 shadow-2xl">
+           <div className="w-10 h-10 rounded-full bg-red-600 flex items-center justify-center font-black text-white animate-pulse">
+             {gameState.bombCountdown || 15}
+           </div>
+           <p className="font-bold text-red-200 uppercase tracking-widest text-[10px]">
+             {gameState.players.find(p => p.id === gameState.waitingForDefuse)?.name} is defusing!
+           </p>
+        </div>
+      )}
+
+      {/* Favor Request Overlay */}
+      {renderFavorOverlay()}
+
       {isExploding && isMyTurn && (
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="absolute inset-0 bg-red-950/95 backdrop-blur-3xl flex flex-col items-center justify-center z-50 p-6">
             <h2 className="text-7xl md:text-9xl font-black text-white mb-2 animate-bounce">KABOOM!</h2>
