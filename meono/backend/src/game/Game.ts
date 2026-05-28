@@ -66,7 +66,7 @@ export class Game {
     }
 
     const defusesGiven = this.players.length;
-    const defusesRemaining = 6 - defusesGiven;
+    const defusesRemaining = this.players.length <= 3 ? 2 : (6 - defusesGiven);
     for (let i = 0; i < defusesRemaining; i++) {
       this.drawPile.push({
         id: generateCardId(),

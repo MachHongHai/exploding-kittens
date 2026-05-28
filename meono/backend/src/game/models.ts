@@ -46,32 +46,43 @@ export function generateCardId(): string {
 export function createDeck(playerCount: number): Card[] {
   const deck: Card[] = [];
   
-  // Scale card counts based on player count
-  // Base counts for 5 players (total 46 functional cards)
-  // For 2-3 players, we reduce the count of action cards slightly
-  const multiplier = playerCount <= 3 ? 0.7 : 1.0;
+  const isSmallGame = playerCount <= 3;
   
   const addCards = (type: CardType, count: number, name: string, description: string) => {
-    const finalCount = Math.max(2, Math.round(count * multiplier));
-    for (let i = 0; i < finalCount; i++) {
+    for (let i = 0; i < count; i++) {
       deck.push({ id: generateCardId(), type, name, description });
     }
   };
 
+  // Standard Exploding Kittens deck distribution (with paw print setup for 2-3 players)
+  const counts = {
+    [CardType.ATTACK]: isSmallGame ? 2 : 4,
+    [CardType.SKIP]: isSmallGame ? 4 : 4,
+    [CardType.FAVOR]: isSmallGame ? 2 : 4,
+    [CardType.SHUFFLE]: isSmallGame ? 2 : 4,
+    [CardType.SEE_THE_FUTURE]: isSmallGame ? 3 : 5,
+    [CardType.NOPE]: isSmallGame ? 4 : 5,
+    [CardType.CAT_CARD_1]: isSmallGame ? 3 : 4,
+    [CardType.CAT_CARD_2]: isSmallGame ? 3 : 4,
+    [CardType.CAT_CARD_3]: isSmallGame ? 3 : 4,
+    [CardType.CAT_CARD_4]: isSmallGame ? 3 : 4,
+    [CardType.CAT_CARD_5]: isSmallGame ? 3 : 4,
+  };
+
   // Action Cards
-  addCards(CardType.ATTACK, 4, 'Attack', 'End your turn without drawing and force the next player to take 2 turns.');
-  addCards(CardType.SKIP, 4, 'Skip', 'End your turn without drawing.');
-  addCards(CardType.FAVOR, 4, 'Favor', 'Force any other player to give you 1 card from their hand.');
-  addCards(CardType.SHUFFLE, 4, 'Shuffle', 'Shuffle the draw pile.');
-  addCards(CardType.SEE_THE_FUTURE, 5, 'See The Future', 'View the top 3 cards of the draw pile.');
-  addCards(CardType.NOPE, 5, 'Nope', 'Stop any action except an Exploding Kitten or a Defuse card.');
+  addCards(CardType.ATTACK, counts[CardType.ATTACK], 'Attack', 'End your turn without drawing and force the next player to take 2 turns.');
+  addCards(CardType.SKIP, counts[CardType.SKIP], 'Skip', 'End your turn without drawing.');
+  addCards(CardType.FAVOR, counts[CardType.FAVOR], 'Favor', 'Force any other player to give you 1 card from their hand.');
+  addCards(CardType.SHUFFLE, counts[CardType.SHUFFLE], 'Shuffle', 'Shuffle the draw pile.');
+  addCards(CardType.SEE_THE_FUTURE, counts[CardType.SEE_THE_FUTURE], 'See The Future', 'View the top 3 cards of the draw pile.');
+  addCards(CardType.NOPE, counts[CardType.NOPE], 'Nope', 'Stop any action except an Exploding Kitten or a Defuse card.');
   
-  // Cat Cards (Always keep them in pairs of at least 2)
-  addCards(CardType.CAT_CARD_1, 4, 'Tacocat', 'Play as a pair to steal a random card.');
-  addCards(CardType.CAT_CARD_2, 4, 'Cattermelon', 'Play as a pair to steal a random card.');
-  addCards(CardType.CAT_CARD_3, 4, 'Hairy Potato Cat', 'Play as a pair to steal a random card.');
-  addCards(CardType.CAT_CARD_4, 4, 'Beard Cat', 'Play as a pair to steal a random card.');
-  addCards(CardType.CAT_CARD_5, 4, 'Rainbow-Ralphing Cat', 'Play as a pair to steal a random card.');
+  // Cat Cards
+  addCards(CardType.CAT_CARD_1, counts[CardType.CAT_CARD_1], 'Tacocat', 'Play as a pair to steal a random card.');
+  addCards(CardType.CAT_CARD_2, counts[CardType.CAT_CARD_2], 'Cattermelon', 'Play as a pair to steal a random card.');
+  addCards(CardType.CAT_CARD_3, counts[CardType.CAT_CARD_3], 'Hairy Potato Cat', 'Play as a pair to steal a random card.');
+  addCards(CardType.CAT_CARD_4, counts[CardType.CAT_CARD_4], 'Beard Cat', 'Play as a pair to steal a random card.');
+  addCards(CardType.CAT_CARD_5, counts[CardType.CAT_CARD_5], 'Rainbow-Ralphing Cat', 'Play as a pair to steal a random card.');
 
   return shuffleDeck(deck);
 }
