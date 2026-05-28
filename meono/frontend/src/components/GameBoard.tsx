@@ -271,10 +271,26 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
     );
   }
 
-  const leftOpponent = opponents[0];
-  const topOpponent = opponents[1];
-  const rightOpponent = opponents[2];
-  const farRightOpponent = opponents[3];
+  let leftOpponent: any = undefined;
+  let topOpponent: any = undefined;
+  let rightOpponent: any = undefined;
+  let farRightOpponent: any = undefined;
+
+  if (opponents.length === 1) {
+    topOpponent = opponents[0];
+  } else if (opponents.length === 2) {
+    leftOpponent = opponents[0];
+    rightOpponent = opponents[1];
+  } else if (opponents.length === 3) {
+    leftOpponent = opponents[0];
+    topOpponent = opponents[1];
+    rightOpponent = opponents[2];
+  } else {
+    leftOpponent = opponents[0];
+    topOpponent = opponents[1];
+    rightOpponent = opponents[2];
+    farRightOpponent = opponents[3];
+  }
 
   const renderOpponent = (opp: any, position: string) => {
     if (!opp) return null;
@@ -366,7 +382,84 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
           
           <div className="flex flex-row items-center gap-8 sm:gap-16 pointer-events-auto">
             {/* Draw Pile */}
-            <div className="flex flex-col items-center">
+            <div className="flex flex-col items-center relative">
+              <AnimatePresence>
+                {isShuffling && (
+                  <>
+                    {/* Ghost Card 1 */}
+                    <motion.div
+                      key="shuffle-ghost-1"
+                      initial={{ scale: 0.5, opacity: 0, x: 0, y: 0, rotate: 0 }}
+                      animate={{
+                        scale: 0.85,
+                        opacity: [0, 0.8, 0.8, 0],
+                        x: [-20, -100, 100, -20],
+                        y: [0, -10, -20, 0],
+                        rotate: [0, -15, 15, 0],
+                        zIndex: [10, 5, 20, 10]
+                      }}
+                      exit={{ scale: 0.5, opacity: 0, x: 0, y: 0, rotate: 0 }}
+                      transition={{
+                        duration: 1.0,
+                        repeat: Infinity,
+                        ease: "easeInOut"
+                      }}
+                      className="absolute top-0 left-0 pointer-events-none"
+                    >
+                      <CardView disabled className="shadow-[0_0_30px_rgba(239,68,68,0.3)] border-red-500/20" />
+                    </motion.div>
+
+                    {/* Ghost Card 2 */}
+                    <motion.div
+                      key="shuffle-ghost-2"
+                      initial={{ scale: 0.5, opacity: 0, x: 0, y: 0, rotate: 0 }}
+                      animate={{
+                        scale: 0.85,
+                        opacity: [0, 0.8, 0.8, 0],
+                        x: [20, 100, -100, 20],
+                        y: [0, -20, -10, 0],
+                        rotate: [0, 15, -15, 0],
+                        zIndex: [5, 20, 10, 5]
+                      }}
+                      exit={{ scale: 0.5, opacity: 0, x: 0, y: 0, rotate: 0 }}
+                      transition={{
+                        duration: 1.0,
+                        repeat: Infinity,
+                        ease: "easeInOut",
+                        delay: 0.15
+                      }}
+                      className="absolute top-0 left-0 pointer-events-none"
+                    >
+                      <CardView disabled className="shadow-[0_0_30px_rgba(239,68,68,0.3)] border-red-500/20" />
+                    </motion.div>
+
+                    {/* Ghost Card 3 */}
+                    <motion.div
+                      key="shuffle-ghost-3"
+                      initial={{ scale: 0.5, opacity: 0, x: 0, y: 0, rotate: 0 }}
+                      animate={{
+                        scale: 0.85,
+                        opacity: [0, 0.8, 0.8, 0],
+                        x: [0, 0, 0, 0],
+                        y: [0, -60, 0, 0],
+                        rotate: [0, 5, -5, 0],
+                        zIndex: [15, 10, 15, 15]
+                      }}
+                      exit={{ scale: 0.5, opacity: 0, x: 0, y: 0, rotate: 0 }}
+                      transition={{
+                        duration: 1.0,
+                        repeat: Infinity,
+                        ease: "easeInOut",
+                        delay: 0.3
+                      }}
+                      className="absolute top-0 left-0 pointer-events-none"
+                    >
+                      <CardView disabled className="shadow-[0_0_30px_rgba(239,68,68,0.3)] border-red-500/20" />
+                    </motion.div>
+                  </>
+                )}
+              </AnimatePresence>
+
               <motion.button 
                 animate={isShuffling ? { 
                   x: [0, -10, 10, -10, 10, 0],
@@ -376,7 +469,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
                 transition={{ duration: 0.5, repeat: isShuffling ? Infinity : 0 }}
                 onClick={() => isMyTurn && !isExploding && onAction({ type: 'DRAW_CARD' })}
                 disabled={!isMyTurn || isExploding}
-                className="relative group transition-all duration-500"
+                className="relative group transition-all duration-500 z-10"
               >
                 <CardView disabled={!isMyTurn} />
                 <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
@@ -385,7 +478,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
                    </div>
                 </div>
               </motion.button>
-              <span className="mt-4 font-black tracking-widest text-slate-600 uppercase text-[9px]">Draw</span>
+              <span className="mt-4 font-black tracking-widest text-slate-600 uppercase text-[9px] z-10">Draw</span>
             </div>
 
             {/* Discard Pile Real Stack */}
@@ -507,14 +600,14 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
             key={gameState.lastAction || "theft-animation"}
             initial={{ top: '80%', left: '50%', x: '-50%', y: '-50%', scale: 1, opacity: 1 }} 
             animate={{ 
-              top: gameState.lastTheft?.stealerId === opponents[0]?.id ? '50%' : 
-                   gameState.lastTheft?.stealerId === opponents[1]?.id ? '15%' : 
-                   gameState.lastTheft?.stealerId === opponents[2]?.id ? '50%' : 
-                   gameState.lastTheft?.stealerId === opponents[3]?.id ? '70%' : '50%',
-              left: gameState.lastTheft?.stealerId === opponents[0]?.id ? '10%' : 
-                    gameState.lastTheft?.stealerId === opponents[1]?.id ? '50%' : 
-                    gameState.lastTheft?.stealerId === opponents[2]?.id ? '90%' : 
-                    gameState.lastTheft?.stealerId === opponents[3]?.id ? '90%' : '50%',
+              top: gameState.lastTheft?.stealerId === leftOpponent?.id ? '50%' : 
+                   gameState.lastTheft?.stealerId === topOpponent?.id ? '15%' : 
+                   gameState.lastTheft?.stealerId === rightOpponent?.id ? '50%' : 
+                   gameState.lastTheft?.stealerId === farRightOpponent?.id ? '70%' : '50%',
+              left: gameState.lastTheft?.stealerId === leftOpponent?.id ? '10%' : 
+                    gameState.lastTheft?.stealerId === topOpponent?.id ? '50%' : 
+                    gameState.lastTheft?.stealerId === rightOpponent?.id ? '90%' : 
+                    gameState.lastTheft?.stealerId === farRightOpponent?.id ? '90%' : '50%',
               scale: 0.3,
               opacity: [1, 1, 0.9, 0]
             }} 

@@ -8,7 +8,22 @@ export class Game {
   public discardPile: Card[] = [];
   public currentPlayerIndex: number = 0;
   public status: 'LOBBY' | 'PLAYING' | 'GAME_OVER' = 'LOBBY';
-  public lastAction: string | null = null;
+  private _lastAction: string | null = null;
+  public actionHistory: string[] = [];
+
+  get lastAction(): string | null {
+    return this._lastAction;
+  }
+
+  set lastAction(value: string | null) {
+    this._lastAction = value;
+    if (value) {
+      this.actionHistory.push(value);
+      if (this.actionHistory.length > 20) {
+        this.actionHistory.shift();
+      }
+    }
+  }
   public winner: string | null = null;
   public waitingForDefuse: string | null = null;
   public waitingForSteal: { stealerId: string; victimId: string; count: number } | null = null;

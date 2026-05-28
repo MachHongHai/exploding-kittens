@@ -55,6 +55,75 @@ export class AIBotController {
     return hand[0].id;
   }
 
+  private selectStrategicTarget(botId: string): any {
+    const opponents = this.game.players.filter(p => p.id !== botId && !p.isEliminated && p.handCount > 0);
+    if (opponents.length === 0) return null;
+    if (opponents.length === 1) return opponents[0];
+
+    // Find the next active player in the turn order
+    let nextIndex = (this.game.currentPlayerIndex + 1) % this.game.players.length;
+    while (this.game.players[nextIndex].isEliminated) {
+      nextIndex = (nextIndex + 1) % this.game.players.length;
+    }
+    const nextPlayer = this.game.players[nextIndex];
+
+    const bot = this.game.players.find(p => p.id === botId);
+    const botHasDefuse = bot ? bot.hand.some(c => c.type === CardType.DEFUSE) : false;
+
+    let bestTarget = opponents[0];
+    let highestScore = -Infinity;
+
+    opponents.forEach(p => {
+      // 1. Base score from hand count (more cards = higher value target)
+      let score = p.handCount * 1.5;
+
+      // 2. Turn order pressure (target next player to reduce their defensive options right before they draw)
+      if (p.id === nextPlayer.id) {
+        score += 6.0;
+      }
+
+      // 3. Defuse card strategic targeting
+      const opponentHasDefuse = p.hasDefuse();
+      if (!botHasDefuse) {
+        // If the bot has NO Defuse card, it should prioritize stealing from players who actually have a Defuse card!
+        if (opponentHasDefuse) {
+          score += 10.0;
+        }
+      } else {
+        // If the bot already has a Defuse, it's still good to steal a Defuse, but stealing from a player who has NO Defuse
+        // might leave them completely defenseless and eliminate them on their next turn!
+        if (!opponentHasDefuse) {
+          score += 4.0;
+        }
+      }
+
+      // 4. Retaliation / Play history (check if they targeted us recently in the action history)
+      const targetName = p.name;
+      const botName = bot?.name || "";
+      let retaliationCount = 0;
+      
+      const gameWithHistory = this.game as any;
+      if (gameWithHistory.actionHistory) {
+        const history: string[] = gameWithHistory.actionHistory;
+        // Check the last 10 actions for aggression against this bot
+        const recentHistory = history.slice(-10);
+        recentHistory.forEach(action => {
+          if (action.includes(targetName) && (action.includes("played Favor on " + botName) || action.includes("played a Pair on " + botName) || action.includes("stole from " + botName))) {
+            retaliationCount++;
+          }
+        });
+      }
+      score += retaliationCount * 5.0; // Add 5 points for each recent aggressive action against us
+
+      if (score > highestScore) {
+        highestScore = score;
+        bestTarget = p;
+      }
+    });
+
+    return bestTarget;
+  }
+
   private takeEasyTurn(botId: string, requiresDefuse: boolean): PlayerAction {
     const player = this.game.players.find(p => p.id === botId)!;
 
@@ -173,9 +242,8 @@ export class AIBotController {
       return { type: 'PLAY_CARDS', cardIds: [shuffleCard.id] };
     }
 
-    // Combos / Stealing (Favor / Pairs) - play them anytime (especially mid game to build hand, or late game to steal)
-    const opponents = this.game.players.filter(p => p.id !== botId && !p.isEliminated && p.handCount > 0);
-    const target = opponents.length > 0 ? opponents[Math.floor(Math.random() * opponents.length)] : null;
+    // Combos / Stealing (Favor / Pairs) - play them strategic (use smart targeting score)
+    const target = this.selectStrategicTarget(botId);
 
     if (target) {
       // Pairs
@@ -236,6 +304,11 @@ export class AIBotController {
       ? player.knownDeckTop.map((c: any, i: number) => `Position ${i} (0 is top/immediate draw): ${c.cardName}`).join('\n')
       : 'None (Unknown cards)';
 
+    const gameWithHistory = this.game as any;
+    const historyDesc = gameWithHistory.actionHistory && gameWithHistory.actionHistory.length > 0
+      ? gameWithHistory.actionHistory.slice(-10).join('\n')
+      : 'None yet';
+
     const gameStateDesc = `
     - Draw pile size: ${this.game.drawPile.length}
     - Discard pile top card: ${this.game.discardPile.length > 0 ? this.game.discardPile[this.game.discardPile.length - 1].name : 'Empty'}
@@ -243,6 +316,8 @@ export class AIBotController {
     - Requires Defuse right now?: ${requiresDefuse ? 'YES' : 'NO'}
     - Cards you know at the top of the draw pile (from top to bottom):
 ${knownTop}
+    - Recent Action History (last 10 moves):
+${historyDesc}
     - Opponents: ${JSON.stringify(opponents)}
     `;
 
@@ -386,9 +461,8 @@ ${knownTop}
     });
     const pairType = Object.keys(counts).find(type => counts[type].length >= 2);
 
-    // Find opponents
-    const opponents = this.game.players.filter(p => p.id !== botId && !p.isEliminated);
-    const richestOpponent = opponents.reduce((prev, current) => (prev.handCount > current.handCount) ? prev : current, opponents[0]);
+    // Find opponents and select strategic target
+    const richestOpponent = this.selectStrategicTarget(botId);
 
     // --- 3. DECISION-MAKING FLOW ---
 
