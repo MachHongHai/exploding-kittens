@@ -193,6 +193,52 @@ export class AIBotController {
     return null; // Truly nothing left
   }
 
+  private getRevengeScore(botId: string, targetId: string): number {
+    const bot = this.game.players.find(p => p.id === botId);
+    const target = this.game.players.find(p => p.id === targetId);
+    if (!bot || !target) return 0;
+
+    const botName = bot.name;
+    const targetName = target.name;
+    let revengeScore = 0;
+
+    const gameWithHistory = this.game as any;
+    if (gameWithHistory.actionHistory) {
+      const history: string[] = gameWithHistory.actionHistory;
+      const totalActions = history.length;
+      if (totalActions === 0) return 0;
+      
+      let lastActionByBot = false;
+      
+      history.forEach((action, idx) => {
+        const recencyWeight = 1.0 + (idx / totalActions) * 2.0; 
+        
+        if (action.includes(targetName)) {
+          if (
+            action.includes("played Favor on " + botName) || 
+            action.includes("played a Pair on " + botName) || 
+            action.includes("Three of a kind on " + botName) || 
+            action.includes("stole from " + botName)
+          ) {
+            revengeScore += 8.0 * recencyWeight;
+          }
+        }
+        
+        if (action.includes(`${botName} played`)) {
+          lastActionByBot = true;
+        } else if (action.includes("Nope!")) {
+          if (lastActionByBot && action.includes(targetName)) {
+            revengeScore += 12.0 * recencyWeight;
+          }
+        } else {
+          lastActionByBot = false;
+        }
+      });
+    }
+
+    return revengeScore;
+  }
+
   private selectStrategicTarget(botId: string): any {
     const opponents = this.game.players.filter(p => p.id !== botId && !p.isEliminated && p.handCount > 0);
     if (opponents.length === 0) return null;
@@ -259,50 +305,7 @@ export class AIBotController {
       }
 
       // 4. Retaliation / Play history (The Grudge System)
-      const targetName = p.name;
-      const botName = bot?.name || "";
-      let revengeScore = 0;
-      
-      const gameWithHistory = this.game as any;
-      if (gameWithHistory.actionHistory) {
-        const history: string[] = gameWithHistory.actionHistory;
-        // Check the entire history (max 30 actions), giving more weight to recent actions
-        const totalActions = history.length;
-        
-        let lastActionByBot = false;
-        
-        history.forEach((action, idx) => {
-          // Calculate recency weight (from 1.0 for oldest to 3.0 for newest)
-          const recencyWeight = 1.0 + (idx / totalActions) * 2.0; 
-          
-          if (action.includes(targetName)) {
-            // Direct aggression against the bot
-            if (
-              action.includes("played Favor on " + botName) || 
-              action.includes("played a Pair on " + botName) || 
-              action.includes("Three of a kind on " + botName) || 
-              action.includes("stole from " + botName)
-            ) {
-              revengeScore += 8.0 * recencyWeight;
-            }
-            // Indirect aggression (e.g. playing Attack on the bot, but the action string might just say "played an Attack card")
-            // Wait, Attack cards don't have targets in the action string, they affect the next player. 
-            // We rely on direct targeted actions here.
-          }
-          
-          // Noping the bot's actions is the ultimate offense
-          if (action.includes(`${botName} played`)) {
-            lastActionByBot = true;
-          } else if (action.includes("Nope!")) {
-            if (lastActionByBot && action.includes(targetName)) {
-              revengeScore += 12.0 * recencyWeight; // Massive grudge for Noping us!
-            }
-          } else {
-            lastActionByBot = false;
-          }
-        });
-      }
-      
+      const revengeScore = this.getRevengeScore(botId, p.id);
       score += revengeScore;
 
       // Add a slight randomness to break ties or prevent perfectly predictable behavior
@@ -634,6 +637,8 @@ ${historyDesc}
     const isTopCardBomb = player.knownDeckTop.length > 0 && 
                           player.knownDeckTop[0].cardType === CardType.EXPLODING_KITTEN;
 
+    const isEarlyGame = deckSize > 15;
+
     // Easy bots: simple 25% chance of noping if targeted, never counter-nope
     if (difficulty === 'EASY') {
       if (action.playerId !== botId && action.nopeCount === 0 && action.targetId === botId && Math.random() < 0.25) {
@@ -644,7 +649,7 @@ ${historyDesc}
 
     // --- CASE 1: COUNTER-NOPING (YUP) to protect our own action ---
     if (action.playerId === botId) {
-      // We only counter-nope if our action is currently noped (nopeCount is odd: 1, 3, etc.)
+      // We only counter-nope if our action is currently noped (nopeCount is even/odd mismatch)
       if (action.nopeCount % 2 === 0) return null;
 
       const cardType = action.cards[0]?.type;
@@ -691,9 +696,17 @@ ${historyDesc}
         const totalCards = this.game.players.filter(p => !p.isEliminated).reduce((sum, p) => sum + p.handCount, 0);
         const avgCards = aliveCount > 0 ? totalCards / aliveCount : 0;
         
-        // If the noper is a massive hoarder/leader, and we have a Nope, we counter-nope them to bleed their cards and force the action!
-        if (lastNoper.handCount >= avgCards + 3 && Math.random() < 0.6) {
-          console.log(`[AIBot - Nope] Bot ${player.name} Counter-Nopes ${lastNoper.name} purely because they are the LEADER (Collusion)!`);
+        // COLLUSION: If the noper is a massive hoarder/leader, we counter-nope them. 
+        // In early game, only do this if the leader is ridiculously ahead (>= avg + 5 cards or >= 10 cards).
+        const isLeaderRidiculous = lastNoper.handCount >= avgCards + 5 || lastNoper.handCount >= 10;
+        const shouldCollude = !isEarlyGame || isLeaderRidiculous;
+
+        // Grudge influence: increase counter-nope probability if bot hates the last noper
+        const grudge = this.getRevengeScore(botId, lastNoper.id);
+        const colludeProb = Math.min(0.9, 0.3 + (grudge / 25));
+
+        if (shouldCollude && lastNoper.handCount >= avgCards + 3 && Math.random() < colludeProb) {
+          console.log(`[AIBot - Nope] Bot ${player.name} Counter-Nopes ${lastNoper.name} (Collusion/Grudge score: ${grudge.toFixed(1)})!`);
           return { type: 'PLAY_NOPE', cardId: nopeCard.id };
         }
       }
@@ -721,7 +734,25 @@ ${historyDesc}
 
     // 3. If targeted by Favor or Steal combo:
     if (isTargeted && (cardType === CardType.FAVOR || action.actionType === '2-CARD' || action.actionType === '3-CARD')) {
-      // Protect our cards if we have a small hand (protecting Defuse/Nope) or in late game
+      // Early game optimization to prevent wasting Nopes
+      if (isEarlyGame) {
+        // Direct request for DEFUSE via 3-card combo must be Noped if we have it
+        if (action.actionType === '3-CARD' && action.requestedCardType === CardType.DEFUSE && hasDefuse) {
+          console.log(`[AIBot - Nope] Bot ${player.name} Nopes 3-card combo in early game because opponent requested DEFUSE.`);
+          return { type: 'PLAY_NOPE', cardId: nopeCard.id };
+        }
+        
+        // Only Nope if protecting our only valuable survival asset (hand contains only Defuse and Nope, or similar)
+        const protectingDefuse = hasDefuse && handSize <= 2;
+        if (protectingDefuse) {
+          console.log(`[AIBot - Nope] Bot ${player.name} Nopes early combo/favor to protect its precious Defuse.`);
+          return { type: 'PLAY_NOPE', cardId: nopeCard.id };
+        }
+        
+        return null; // Let them have a low-value card in early game
+      }
+
+      // Mid/Late game logic: Protect hand if small or late game
       const protectingDefuse = hasDefuse && handSize <= 3;
       const isLateGame = deckSize <= 8;
       if (protectingDefuse || isLateGame || Math.random() < 0.3) {
@@ -741,6 +772,16 @@ ${historyDesc}
       const nextPlayerId = this.game.players[nextIndex].id;
 
       if (nextPlayerId === botId || action.targetId === botId) {
+        // Early game optimization: If we have a Defuse, never Nope the Attack.
+        // If we don't have a Defuse, only Nope with 20% probability (save Nope for later when bomb is more likely)
+        if (isEarlyGame) {
+          if (!hasDefuse && Math.random() < 0.20) {
+            console.log(`[AIBot - Nope] Bot ${player.name} Nopes Attack in early game due to no Defuse (Desperate).`);
+            return { type: 'PLAY_NOPE', cardId: nopeCard.id };
+          }
+          return null;
+        }
+
         // Nope the Attack only if we are in danger (no Defuse or deck is late game)
         if (!hasDefuse || deckSize <= 8) {
           console.log(`[AIBot - Nope] Bot ${player.name} Nopes Attack from opponent due to danger.`);
@@ -754,12 +795,34 @@ ${historyDesc}
     // we might Nope them just to bleed their cards and protect the other weak players!
     if (!isTargeted && action.playerId !== botId && (cardType === CardType.FAVOR || action.actionType === '2-CARD' || action.actionType === '3-CARD')) {
       const activePlayer = this.game.players.find(p => p.id === action.playerId);
+      const targetPlayer = this.game.players.find(p => p.id === action.targetId);
       const aliveCount = this.game.players.filter(p => !p.isEliminated).length;
       const totalCards = this.game.players.filter(p => !p.isEliminated).reduce((sum, p) => sum + p.handCount, 0);
+      
       if (activePlayer && aliveCount >= 3) {
         const avgCards = totalCards / aliveCount;
-        if (activePlayer.handCount >= avgCards + 3 && Math.random() < 0.4) {
-          console.log(`[AIBot - Nope] Bot ${player.name} Nopes ${activePlayer.name}'s action purely because they are the LEADER (Collusion)!`);
+        
+        // Special cases to allow third-party Nope in early game:
+        // 1. Leader is ridiculously ahead (>= avg + 5 cards or >= 10 cards)
+        // 2. The victim of the attack/steal is extremely vulnerable (<= 2 cards and has no Defuse)
+        // 3. Leader is attempting to steal a DEFUSE with a 3-card combo
+        const isLeaderRidiculous = activePlayer.handCount >= avgCards + 5 || activePlayer.handCount >= 10;
+        const targetIsVulnerable = targetPlayer && targetPlayer.handCount <= 2 && !targetPlayer.hasDefuse();
+        const stealingDefuse = action.actionType === '3-CARD' && action.requestedCardType === CardType.DEFUSE;
+        
+        const shouldThirdPartyNope = !isEarlyGame || isLeaderRidiculous || targetIsVulnerable || stealingDefuse;
+
+        // Grudge influence: 
+        // - More likely to Nope the active player (Leader) if we have a grudge against them.
+        // - If we have a high grudge against the targetPlayer (victim), we might NOT Nope to let them get bullied!
+        const leaderGrudge = this.getRevengeScore(botId, activePlayer.id);
+        const victimGrudge = targetPlayer ? this.getRevengeScore(botId, targetPlayer.id) : 0;
+        const victimIsHated = victimGrudge > 10;
+
+        const colludeProb = victimIsHated ? 0 : Math.min(0.85, 0.2 + (leaderGrudge / 25));
+
+        if (shouldThirdPartyNope && activePlayer.handCount >= avgCards + 3 && Math.random() < colludeProb) {
+          console.log(`[AIBot - Nope] Bot ${player.name} Nopes ${activePlayer.name}'s action due to Collusion/Leader Grudge (Grudge: ${leaderGrudge.toFixed(1)}, Victim Grudge: ${victimGrudge.toFixed(1)})!`);
           return { type: 'PLAY_NOPE', cardId: nopeCard.id };
         }
       }

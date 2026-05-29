@@ -637,7 +637,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
                     transition={{ duration: 1.0 }}
                     className="absolute top-0 left-0 pointer-events-none"
                   >
-                    <CardView disabled className="shadow-[0_0_20px_rgba(239,68,68,0.3)] border-red-500/20 w-20 sm:w-24 h-30 sm:h-36" />
+                    <CardView disabled className="shadow-[0_0_20px_rgba(239,68,68,0.3)] border-red-500/20 w-24 sm:w-28 h-36 sm:h-42" />
                   </motion.div>
                   <motion.div
                     key="shuffle-ghost-2"
@@ -653,7 +653,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
                     transition={{ duration: 1.0, delay: 0.15 }}
                     className="absolute top-0 left-0 pointer-events-none"
                   >
-                    <CardView disabled className="shadow-[0_0_20px_rgba(239,68,68,0.3)] border-red-500/20 w-20 sm:w-24 h-30 sm:h-36" />
+                    <CardView disabled className="shadow-[0_0_20px_rgba(239,68,68,0.3)] border-red-500/20 w-24 sm:w-28 h-36 sm:h-42" />
                   </motion.div>
                 </>
               )}
@@ -668,7 +668,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
               transition={{ duration: 0.5, repeat: isShuffling ? Infinity : 0 }}
               onClick={() => isMyTurn && !isExploding && onAction({ type: 'DRAW_CARD' })}
               disabled={!isMyTurn || isExploding}
-              className={`relative group transition-all duration-500 z-10 shrink-0 aspect-[2/3] w-20 sm:w-24 rounded-[1.2rem] p-1.5 bg-[#4d0c0c] border-4 border-[#e25c34]/80 shadow-[0_8px_20px_rgba(0,0,0,0.6)] ${
+              className={`relative group transition-all duration-500 z-10 shrink-0 aspect-[2/3] w-24 sm:w-28 rounded-[1.2rem] p-1.5 bg-[#4d0c0c] border-4 border-[#e25c34]/80 shadow-[0_8px_20px_rgba(0,0,0,0.6)] ${
                 isMyTurn && !isExploding ? 'cursor-pointer hover:scale-105 active:scale-95' : 'cursor-not-allowed opacity-90'
               }`}
             >
@@ -695,7 +695,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
 
           {/* Discard Pile */}
           <div className="flex flex-col items-center">
-            <div className="relative w-20 sm:w-24 h-30 sm:h-36">
+            <div className="relative w-24 sm:w-28 h-36 sm:h-42">
               {gameState.discardPile.length === 0 ? (
                 <div className="w-full h-full border-4 border-dashed border-amber-900/20 rounded-[1.2rem] flex items-center justify-center bg-black/30 shadow-inner">
                   <span className="text-amber-100/10 font-cartoon uppercase text-[10px]">Empty</span>
@@ -732,7 +732,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
                           transition={{ duration: 1.5, ease: 'easeOut' }}
                         />
                       )}
-                      <CardView card={card} disabled={!isTop} layoutId={card.id} className="w-20 sm:w-24 h-30 sm:h-36" />
+                      <CardView card={card} disabled={!isTop} layoutId={card.id} className="w-24 sm:w-28 h-36 sm:h-42" />
                     </motion.div>
                   )
                 })
