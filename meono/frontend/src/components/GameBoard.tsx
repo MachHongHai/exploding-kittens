@@ -405,39 +405,60 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
 
                   {/* Card Hand Tray (Red overlapping cards, placed *in front* of the bottom of the circle) */}
                   {!opp.isEliminated && (
-                    <div className={`absolute bottom-[-16px] left-1/2 -translate-x-1/2 flex justify-center z-20 ${
-                      isStealer && opp.id === victimId ? 'pointer-events-auto' : 'pointer-events-none'
-                    }`}
-                         style={{ 
-                           gap: opp.handCount > 5 ? `-${Math.min(24, 12 + (opp.handCount - 5) * 1.5)}px` : '-12px' 
-                         }}
-                    >
-                      {opp.handCount > 0 && Array.from({ length: opp.handCount }).map((_, cardIdx) => {
-                        const mid = (opp.handCount - 1) / 2;
-                        const rotation = (cardIdx - mid) * (opp.handCount > 8 ? 8 : 12);
-                        const translateY = Math.abs(cardIdx - mid) * 1.5;
-                        const isStealTarget = isStealer && opp.id === victimId;
-                        return (
-                          <motion.button 
-                            key={cardIdx} 
-                            type="button"
-                            onClick={() => isStealTarget && handleStealPick(cardIdx)}
-                            whileHover={isStealTarget ? { y: -15, scale: 1.3, zIndex: 100 } : {}}
-                            whileTap={isStealTarget ? { scale: 0.9 } : {}}
-                            className={`w-7 h-10 rounded-md shadow-lg flex items-center justify-center shrink-0 origin-bottom transition-all ${
-                              isStealTarget 
-                                ? 'bg-gradient-to-b from-orange-500 to-red-600 border-2 border-amber-300 cursor-pointer shadow-[0_0_15px_rgba(249,115,22,0.8)] animate-pulse' 
-                                : 'bg-[#dc2626] border border-red-400'
-                            }`}
-                            style={{ transform: `rotate(${rotation}deg) translateY(${translateY}px)` }}
-                          >
-                            <span className="text-[6px] text-white font-cartoon scale-[0.7] leading-none">
-                              {isStealTarget ? '?' : 'EK'}
-                            </span>
-                          </motion.button>
-                        );
-                      })}
-                    </div>
+                    (() => {
+                      const isStealTarget = isStealer && opp.id === victimId;
+                      const bottomOffset = isStealTarget ? '-60px' : '-16px';
+                      const gap = isStealTarget 
+                        ? (opp.handCount > 5 ? '-28px' : '-16px') 
+                        : (opp.handCount > 5 ? `-${Math.min(24, 12 + (opp.handCount - 5) * 1.5)}px` : '-12px');
+
+                      return (
+                        <div 
+                          className={`absolute left-1/2 -translate-x-1/2 flex justify-center z-20 ${
+                            isStealTarget ? 'pointer-events-auto' : 'pointer-events-none'
+                          }`}
+                          style={{ 
+                            bottom: bottomOffset,
+                            gap: gap,
+                            transition: 'bottom 0.5s cubic-bezier(0.34, 1.56, 0.64, 1), gap 0.5s cubic-bezier(0.34, 1.56, 0.64, 1)'
+                          }}
+                        >
+                          {opp.handCount > 0 && Array.from({ length: opp.handCount }).map((_, cardIdx) => {
+                            const mid = (opp.handCount - 1) / 2;
+                            const rotation = (cardIdx - mid) * (isStealTarget ? 8 : (opp.handCount > 8 ? 8 : 12));
+                            const translateY = Math.abs(cardIdx - mid) * (isStealTarget ? 3 : 1.5);
+                            
+                            return (
+                              <motion.button 
+                                key={cardIdx} 
+                                type="button"
+                                onClick={() => isStealTarget && handleStealPick(cardIdx)}
+                                layout
+                                animate={isStealTarget ? { 
+                                  width: '3.5rem', 
+                                  height: '5.25rem',
+                                } : { 
+                                  width: '1.75rem', 
+                                  height: '2.5rem',
+                                }}
+                                whileHover={isStealTarget ? { y: -20, scale: 1.2, zIndex: 100 } : {}}
+                                whileTap={isStealTarget ? { scale: 0.9 } : {}}
+                                className={`rounded-md shadow-lg flex items-center justify-center shrink-0 origin-bottom transition-all duration-300 ${
+                                  isStealTarget 
+                                    ? 'bg-gradient-to-b from-orange-500 to-red-600 border-2 border-amber-300 cursor-pointer shadow-[0_0_20px_rgba(249,115,22,0.9)]' 
+                                    : 'bg-[#dc2626] border border-red-400'
+                                }`}
+                                style={{ transform: `rotate(${rotation}deg) translateY(${translateY}px)` }}
+                              >
+                                <span className={`text-white font-cartoon leading-none ${isStealTarget ? 'text-lg font-black' : 'text-[6px] scale-[0.7]'}`}>
+                                  {isStealTarget ? '?' : 'EK'}
+                                </span>
+                              </motion.button>
+                            );
+                          })}
+                        </div>
+                      );
+                    })()
                   )}
                 </div>
 
