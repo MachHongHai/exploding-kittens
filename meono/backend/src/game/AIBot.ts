@@ -61,6 +61,40 @@ export class AIBotController {
     return hand[0].id;
   }
 
+  private getValidComboType(
+    counts: Record<string, string[]>, 
+    minCount: number, 
+    allowValuable: boolean
+  ): string | null {
+    // Prioritize Cat Cards first
+    const catTypes = Object.keys(counts).filter(type => type.startsWith('CAT_CARD') && counts[type].length >= minCount);
+    if (catTypes.length > 0) return catTypes[0];
+
+    const deckSize = this.game.drawPile.length;
+    const isDesperate = allowValuable || deckSize <= 3;
+
+    // Then functional cards
+    const otherTypes = Object.keys(counts).filter(type => {
+      if (counts[type].length < minCount) return false;
+      if (type.startsWith('CAT_CARD')) return false;
+
+      // NEVER use DEFUSE or NOPE as combos (too valuable)
+      if (type === CardType.DEFUSE || type === CardType.NOPE) return false;
+
+      // If desperate (bomb imminent or deck almost empty), allow using anything else (SKIP, ATTACK, etc.) to steal a potential Defuse
+      if (isDesperate) return true;
+
+      // Otherwise, only allow if we have a strict excess of them (e.g. 3 Skips to make a pair, leaving 1 Skip for defense)
+      if (counts[type].length >= minCount + 1) return true;
+
+      return false;
+    });
+    
+    if (otherTypes.length > 0) return otherTypes[0];
+
+    return null;
+  }
+
   private selectStrategicTarget(botId: string): any {
     const opponents = this.game.players.filter(p => p.id !== botId && !p.isEliminated && p.handCount > 0);
     if (opponents.length === 0) return null;
@@ -156,11 +190,11 @@ export class AIBotController {
     
     // Check for pairs first (Easy bot loves combos)
     const counts: Record<string, string[]> = {};
-    actionCards.forEach(c => {
+    player.hand.forEach(c => {
       if (!counts[c.type]) counts[c.type] = [];
       counts[c.type].push(c.id);
     });
-    const pairType = Object.keys(counts).find(type => counts[type].length >= 2);
+    const pairType = this.getValidComboType(counts, 2, false);
     if (pairType && Math.random() > 0.3) {
       const opponents = this.game.players.filter(p => p.id !== botId && !p.isEliminated && p.handCount > 0);
       const pairTargetId = opponents.length > 0 ? opponents[Math.floor(Math.random() * opponents.length)].id : undefined;
@@ -273,7 +307,7 @@ export class AIBotController {
         if (!counts[c.type]) counts[c.type] = [];
         counts[c.type].push(c.id);
       });
-      const pairType = Object.keys(counts).find(type => counts[type].length >= 2);
+      const pairType = this.getValidComboType(counts, 2, false);
       if (pairType && Math.random() > 0.5) {
         console.log(`[AIBot - Medium] Playing Pair on ${target.name}.`);
         return { type: 'PLAY_CARDS', cardIds: counts[pairType].slice(0, 2), targetId: target.id };
@@ -655,27 +689,8 @@ ${historyDesc}
     const hasDefuse = player.hasDefuse();
     const isDesperation = isBombDanger && !hasDefuse && !attackCard && !skipCard && !shuffleCard;
 
-    // Helper to find a valid combo card type
-    const getValidComboType = (minCount: number, allowValuable: boolean): string | null => {
-      // Prioritize Cat Cards first
-      const catTypes = Object.keys(counts).filter(type => type.startsWith('CAT_CARD') && counts[type].length >= minCount);
-      if (catTypes.length > 0) return catTypes[0];
-
-      // Then non-valuable functional cards
-      const otherTypes = Object.keys(counts).filter(type => {
-        if (counts[type].length < minCount) return false;
-        if (type.startsWith('CAT_CARD')) return false;
-        // Strict preservation under normal circumstances
-        if (!allowValuable && (type === CardType.DEFUSE || type === CardType.NOPE)) return false;
-        return true;
-      });
-      if (otherTypes.length > 0) return otherTypes[0];
-
-      return null;
-    };
-
-    const tripletType = getValidComboType(3, isDesperation);
-    const pairType = getValidComboType(2, isDesperation);
+    const tripletType = this.getValidComboType(counts, 3, isDesperation);
+    const pairType = this.getValidComboType(counts, 2, isDesperation);
 
     // Find opponents and select strategic target
     const richestOpponent = this.selectStrategicTarget(botId);

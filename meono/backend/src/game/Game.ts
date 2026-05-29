@@ -84,7 +84,7 @@ export class Game {
       player.hand = [];
       player.turnsToPlay = 1;
       player.isEliminated = false;
-      
+
       // Give Defuse
       player.drawCard({
         id: generateCardId(),
@@ -127,7 +127,7 @@ export class Game {
       const kittens = this.drawPile.filter(c => c.type === CardType.EXPLODING_KITTEN);
       const defuses = this.drawPile.filter(c => c.type === CardType.DEFUSE);
       const others = this.drawPile.filter(c => c.type !== CardType.EXPLODING_KITTEN && c.type !== CardType.DEFUSE);
-      
+
       const selectedOthers = shuffleDeck(others).slice(0, 11);
       this.drawPile = [...kittens, ...defuses, ...selectedOthers];
     }
@@ -142,17 +142,17 @@ export class Game {
 
   nextTurn() {
     let nextIndex = (this.currentPlayerIndex + 1) % this.players.length;
-    this.lastTheft = null; 
+    this.lastTheft = null;
     this.waitingForSteal = null;
     this.waitingForFavor = null;
     this.playerSeeingFuture = null;
-    
+
     while (this.players[nextIndex].isEliminated) {
       nextIndex = (nextIndex + 1) % this.players.length;
     }
-    
+
     this.currentPlayerIndex = nextIndex;
-    this.getCurrentPlayer().turnsToPlay = 1; 
+    this.getCurrentPlayer().turnsToPlay = 1;
   }
 
   clearFuture(playerId: string) {
@@ -165,12 +165,12 @@ export class Game {
     if (this.status !== 'PLAYING') return { success: false, message: "Game not playing" };
     if (this.waitingForDefuse) return { success: false, message: "A player is currently defusing a kitten!" };
     if (this.pendingAction) return { success: false, message: "An action is currently waiting for Nope!" };
-    
+
     const player = this.getCurrentPlayer();
     if (player.id !== playerId) return { success: false, message: "Not your turn" };
 
     this.lastTheft = null;
-    this.lastNopeableAction = null; 
+    this.lastNopeableAction = null;
 
     if (!cardIds || cardIds.length === 0) return { success: false, message: "No cards selected" };
 
@@ -189,7 +189,7 @@ export class Game {
       if (card.type.startsWith('CAT_CARD')) return { success: false, message: "Cat cards must be played in pairs!" };
       if (card.type === CardType.NOPE) return { success: false, message: "Nope cards must be played during an Action Window!" };
       if (card.type === CardType.DEFUSE || card.type === CardType.EXPLODING_KITTEN) return { success: false, message: "Cannot play this card normally!" };
-      
+
       if (card.type === CardType.FAVOR && !targetId) return { success: false, message: "Favor requires a target" };
 
       cards.forEach(c => player.removeCard(c.id) && this.discardPile.push(c));
@@ -265,7 +265,7 @@ export class Game {
     // Case 1: Standard pending action window (within 5s)
     if (this.pendingAction) {
       if (this.pendingAction.lastNoperId === playerId) return { success: false, message: "You cannot Nope your own Nope!" };
-      
+
       player.removeCard(nopeCard.id);
       this.discardPile.push(nopeCard);
       this.pendingAction.nopeCount++;
@@ -296,12 +296,12 @@ export class Game {
     }
 
     // Case 4: Recent card transfer flying animation (within 1000ms)
-    if (this.lastNopeableAction && 
-        (this.lastNopeableAction.type === '2-CARD' || this.lastNopeableAction.type === '3-CARD' || this.lastNopeableAction.type === 'FAVOR') &&
-        this.lastNopeableAction.targetId === playerId &&
-        Date.now() - this.lastNopeableAction.timestamp < 1000 &&
-        this.lastNopeableAction.stolenCard) {
-      
+    if (this.lastNopeableAction &&
+      (this.lastNopeableAction.type === '2-CARD' || this.lastNopeableAction.type === '3-CARD' || this.lastNopeableAction.type === 'FAVOR') &&
+      this.lastNopeableAction.targetId === playerId &&
+      Date.now() - this.lastNopeableAction.timestamp < 1000 &&
+      this.lastNopeableAction.stolenCard) {
+
       player.removeCard(nopeCard.id);
       this.discardPile.push(nopeCard);
 
@@ -321,12 +321,12 @@ export class Game {
     }
 
     // Case 5: Attack/Skip active turn change (current player plays Nope before drawing/playing)
-    if (this.lastNopeableAction && 
-        (this.lastNopeableAction.type === 'ATTACK' || this.lastNopeableAction.type === 'SKIP') &&
-        this.currentPlayerIndex === this.players.findIndex(p => p.id === playerId) &&
-        this.lastNopeableAction.prevPlayerIndex !== undefined &&
-        this.lastNopeableAction.prevTurnsToPlay !== undefined) {
-      
+    if (this.lastNopeableAction &&
+      (this.lastNopeableAction.type === 'ATTACK' || this.lastNopeableAction.type === 'SKIP') &&
+      this.currentPlayerIndex === this.players.findIndex(p => p.id === playerId) &&
+      this.lastNopeableAction.prevPlayerIndex !== undefined &&
+      this.lastNopeableAction.prevTurnsToPlay !== undefined) {
+
       player.removeCard(nopeCard.id);
       this.discardPile.push(nopeCard);
 
@@ -342,9 +342,9 @@ export class Game {
 
     // Case 6: Noping a resolved Nope (counter-noping after the window has expired)
     if (this.lastNopeableAction &&
-        this.lastNopeableAction.type === 'NOPE' &&
-        this.lastNopeableAction.originalAction) {
-      
+      this.lastNopeableAction.type === 'NOPE' &&
+      this.lastNopeableAction.originalAction) {
+
       player.removeCard(nopeCard.id);
       this.discardPile.push(nopeCard);
 
@@ -453,12 +453,12 @@ export class Game {
 
     const isNoped = action.nopeCount % 2 !== 0;
     const player = this.players.find(p => p.id === action.playerId);
-    
+
     if (!player) return;
 
     if (isNoped) {
       this.lastAction = `${player.name}'s ${action.actionName} was NOPED!`;
-      
+
       this.lastNopeableAction = {
         type: 'NOPE',
         initiatorId: action.lastNoperId || '',
@@ -623,15 +623,15 @@ export class Game {
 
   giveCard(victimId: string, requesterId: string, cardId: string): boolean {
     if (!this.waitingForFavor || this.waitingForFavor.victimId !== victimId || this.waitingForFavor.requesterId !== requesterId) return false;
-    
+
     const victim = this.players.find(p => p.id === victimId);
     const requester = this.players.find(p => p.id === requesterId);
-    
+
     if (!victim || !requester) return false;
-    
+
     const card = victim.removeCard(cardId);
     if (!card) return false;
-    
+
     requester.drawCard(card);
     this.lastAction = `${victim.name} gave a card to ${requester.name} (Favor).`;
     this.lastTheft = { stealerId: requesterId, victimId, cardId: card.id };
@@ -648,7 +648,7 @@ export class Game {
         toId: requesterId
       }
     };
-    
+
     return true;
   }
 
@@ -681,7 +681,7 @@ export class Game {
     }
     player.drawCard(card);
     this.lastAction = `${player.name} drew a card.`;
-    
+
     if (this.lastDefuseAction) {
       this.lastDefuseAction.drawsSinceDefuse++;
     }
