@@ -2,7 +2,7 @@ import { Server, Socket } from 'socket.io';
 import { Game } from '../game/Game.js';
 import { Player } from '../game/models.js';
 import { AIBotController } from '../game/AIBot.js';
-import { PlayerAction } from '../../../shared/src/types.js';
+import { PlayerAction, CardType } from '../../../shared/src/types.js';
 
 export class GameGateway {
   private io: Server;
@@ -12,6 +12,7 @@ export class GameGateway {
   private botDifficulty: 'EASY' | 'MEDIUM' | 'HARD' | 'PLAY_WITH_GEMINI' = 'EASY';
   private bombTimers: Map<string, NodeJS.Timeout> = new Map();
   private nopeTimer: NodeJS.Timeout | null = null;
+  private targetTimer: NodeJS.Timeout | null = null;
   private countdownIntervals: Map<string, NodeJS.Timeout> = new Map();
 
   constructor(io: Server) {
@@ -74,6 +75,8 @@ export class GameGateway {
     this.bombTimers.clear();
     if (this.nopeTimer) clearTimeout(this.nopeTimer);
     this.nopeTimer = null;
+    if (this.targetTimer) clearTimeout(this.targetTimer);
+    this.targetTimer = null;
     this.countdownIntervals.clear();
   }
 
@@ -85,6 +88,10 @@ export class GameGateway {
     if (this.countdownIntervals.has(playerId)) {
       clearInterval(this.countdownIntervals.get(playerId)!);
       this.countdownIntervals.delete(playerId);
+    }
+    if (this.game.waitingForTarget?.playerId === playerId && this.targetTimer) {
+      clearTimeout(this.targetTimer);
+      this.targetTimer = null;
     }
   }
 
@@ -160,10 +167,23 @@ export class GameGateway {
       }
     } else if (action.type === 'PLAY_CARDS') {
       actionResult = this.game.playCards(playerId, action.cardIds, action.targetId, action.requestedCardType);
-      if (actionResult.success && this.game.pendingAction) {
-        this.startNopeTimer();
-        return actionResult; // Return immediately to let timer handle next steps
+      if (actionResult.success) {
+        if (this.game.pendingAction) {
+          this.startNopeTimer();
+          return actionResult; // Return immediately to let timer handle next steps
+        }
+        if (this.game.waitingForTarget) {
+          this.startTargetTimer(playerId);
+          return actionResult;
+        }
       }
+    } else if (action.type === 'SELECT_TARGET') {
+      if (this.targetTimer) {
+        clearTimeout(this.targetTimer);
+        this.targetTimer = null;
+      }
+      const success = this.executeTargetSelection(playerId, action.targetId, action.requestedCardType, false);
+      actionResult = { success, message: success ? '' : 'Failed to select target' };
     } else if (action.type === 'PLAY_NOPE') {
       actionResult = this.game.playNope(playerId, action.cardId);
       if (actionResult.success) {
@@ -274,6 +294,53 @@ export class GameGateway {
         }, delay);
       }
     }
+  }
+
+  private startTargetTimer(playerId: string) {
+    if (this.targetTimer) clearTimeout(this.targetTimer);
+    this.broadcastState();
+    this.targetTimer = setTimeout(() => {
+      this.resolveTargetTimeout(playerId);
+    }, 10000);
+  }
+
+  private resolveTargetTimeout(playerId: string) {
+    this.targetTimer = null;
+    if (!this.game.waitingForTarget || this.game.waitingForTarget.playerId !== playerId) return;
+
+    const opponents = this.game.players.filter(p => p.id !== playerId && !p.isEliminated && p.handCount > 0);
+    if (opponents.length === 0) {
+      this.game.waitingForTarget = null;
+      this.broadcastState();
+      return;
+    }
+
+    const randomOpp = opponents[Math.floor(Math.random() * opponents.length)];
+    let requestedCardType: any = undefined;
+
+    if (this.game.waitingForTarget.type === '3-CARD') {
+      const validTypes = Object.values(CardType).filter(t => t !== 'EXPLODING_KITTEN');
+      requestedCardType = validTypes[Math.floor(Math.random() * validTypes.length)];
+    }
+
+    this.executeTargetSelection(playerId, randomOpp.id, requestedCardType, true);
+  }
+
+  private executeTargetSelection(playerId: string, targetId: string, requestedCardType?: any, isTimeout: boolean = false): boolean {
+    if (!this.game.waitingForTarget || this.game.waitingForTarget.playerId !== playerId) return false;
+
+    const target = this.game.players.find(p => p.id === targetId);
+    if (!target || target.isEliminated || target.handCount === 0) return false;
+
+    this.game.selectTarget(playerId, targetId, requestedCardType, isTimeout);
+    this.game.waitingForTarget = null;
+    this.broadcastState();
+
+    if (this.game.pendingAction) {
+      this.startNopeTimer();
+    }
+
+    return true;
   }
 
   private broadcastState() {

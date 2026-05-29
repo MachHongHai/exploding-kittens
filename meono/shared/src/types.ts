@@ -67,6 +67,11 @@ export interface GameState {
     initiatorId: string;
     lastNoperId?: string;
   };
+  waitingForTarget?: {
+    type: 'FAVOR' | '2-CARD' | '3-CARD';
+    playerId: string;
+    expiresAt: number;
+  };
   explodingKittensCount?: number;
   actionHistory?: string[];
   lastNopeableAction?: {
@@ -96,4 +101,5 @@ export type PlayerAction =
   | { type: 'CONFIRM_FUTURE' }
   | { type: 'DEFUSE', insertIndex: number }
   | { type: 'PLAY_NOPE', cardId: string }
-  | { type: 'PASS_NOPE' };
+  | { type: 'PASS_NOPE' }
+  | { type: 'SELECT_TARGET', targetId: string, requestedCardType?: CardType };

@@ -15,6 +15,22 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
   const [targetPlayerId, setTargetPlayerId] = useState<string | null>(null);
   const [selectedCardIds, setSelectedCardIds] = useState<string[]>([]);
   const [showGuessModal, setShowGuessModal] = useState(false);
+  const showTargetModal = gameState.waitingForTarget && gameState.waitingForTarget.playerId === socketId
+    ? { type: gameState.waitingForTarget.type, cardIds: [] as string[] }
+    : null;
+
+  const [targetSecondsLeft, setTargetSecondsLeft] = useState<number>(10);
+
+  useEffect(() => {
+    if (!gameState.waitingForTarget) return;
+    const updateTimer = () => {
+      const msLeft = gameState.waitingForTarget!.expiresAt - Date.now();
+      setTargetSecondsLeft(Math.max(0, Math.round(msLeft / 1000)));
+    };
+    updateTimer();
+    const interval = setInterval(updateTimer, 200);
+    return () => clearInterval(interval);
+  }, [gameState.waitingForTarget]);
   const [actionError, setActionError] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [isShuffling, setIsShuffling] = useState(false);
@@ -125,6 +141,11 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
   const isMyTurn = gameState.currentPlayerId === socketId && gameState.status === 'PLAYING';
   const isExploding = gameState.waitingForDefuse === socketId;
   const hasDefuse = myPlayer?.hand?.some(c => c.type === CardType.DEFUSE);
+
+  const totalDuration = 10000; // 10 seconds
+  const percentLeft = gameState.waitingForTarget
+    ? Math.max(0, Math.min(100, ((gameState.waitingForTarget.expiresAt - Date.now()) / totalDuration) * 100))
+    : 0;
 
   const [defuseInsertIndex, setDefuseInsertIndex] = useState<number>(0);
 
@@ -320,26 +341,17 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
         setActionError("Cat cards must be played in pairs!");
         return;
       }
-      if (selectedCards[0].type === CardType.FAVOR) {
-        if (!targetPlayerId) { setActionError("Select a target player first!"); return; }
-        action = { type: 'PLAY_CARDS', cardIds: selectedCardIds, targetId: targetPlayerId };
-      } else {
-        action = { type: 'PLAY_CARDS', cardIds: selectedCardIds };
-      }
+      action = { type: 'PLAY_CARDS', cardIds: selectedCardIds };
     } else if (selectedCards.length === 2) {
       if (!isSameType) { setActionError("Pairs must be the same card type!"); return; }
-      if (!targetPlayerId) { setActionError("Select a target player to steal from!"); return; }
-      action = { type: 'PLAY_CARDS', cardIds: selectedCardIds, targetId: targetPlayerId };
+      action = { type: 'PLAY_CARDS', cardIds: selectedCardIds };
     } else if (selectedCards.length === 3) {
       if (!isSameType) { setActionError("3 of a kind must be the same card type!"); return; }
-      if (!targetPlayerId) { setActionError("Select a target player to steal from!"); return; }
-      
       if (!requestedCardType) {
-        setShowGuessModal(true);
-        setActionError(null);
-        return;
+        action = { type: 'PLAY_CARDS', cardIds: selectedCardIds };
+      } else {
+        action = { type: 'PLAY_CARDS', cardIds: selectedCardIds, targetId: targetPlayerId || undefined, requestedCardType };
       }
-      action = { type: 'PLAY_CARDS', cardIds: selectedCardIds, targetId: targetPlayerId, requestedCardType };
     } else {
       setActionError("Invalid combination length!");
       return;
@@ -349,7 +361,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
       onAction(action, (res) => {
         if (res && !res.success) {
           setActionError(res.message);
-          if (selectedCards.length !== 3) setSelectedCardIds([]);
+          setSelectedCardIds([]);
         } else {
           setSelectedCardIds([]);
           setTargetPlayerId(null);
@@ -358,6 +370,29 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
         }
       });
     }
+  };
+
+  const submitTargetAction = (targetId: string) => {
+    if (!showTargetModal) return;
+    
+    setTargetPlayerId(targetId);
+    
+    const { type } = showTargetModal;
+    
+    if (type === '3-CARD') {
+      setShowGuessModal(true);
+      return;
+    }
+
+    // For FAVOR and 2-CARD, immediately dispatch SELECT_TARGET action
+    onAction({ type: 'SELECT_TARGET', targetId }, (res) => {
+      if (res && !res.success) {
+        setActionError(res.message);
+      }
+      setSelectedCardIds([]);
+      setTargetPlayerId(null);
+      setActionError(null);
+    });
   };
 
   if (gameState.status === 'GAME_OVER') {
@@ -479,12 +514,18 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
               }
             }
 
+            const isValidTarget = !!showTargetModal && !opp.isEliminated && opp.handCount > 0;
+
             return (
               <motion.div 
                 key={opp.id}
                 layout
-                onClick={() => setTargetPlayerId(opp.id)}
-                className={`flex flex-col items-center cursor-pointer relative shrink-0 ${opp.isEliminated ? 'opacity-50' : ''}`}
+                onClick={() => isValidTarget && submitTargetAction(opp.id)}
+                whileHover={isValidTarget ? { scale: 1.08, y: -4 } : {}}
+                whileTap={isValidTarget ? { scale: 0.96 } : {}}
+                className={`flex flex-col items-center relative shrink-0 transition-all duration-200 ${
+                  opp.isEliminated ? 'opacity-50' : ''
+                } ${isValidTarget ? 'cursor-pointer z-30' : ''}`}
               >
                 {/* Opponent Name above the circle */}
                 <span className={`font-cartoon text-xs font-bold ${nameColor} uppercase tracking-wider mb-2 drop-shadow`}>
@@ -493,6 +534,48 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
 
                 {/* Avatar Badge & overlapping card fan relative wrapper */}
                 <div className="relative w-22 h-22 flex items-center justify-center shrink-0">
+                  {/* Target Lock Overlay (Rotating Dashed Ring & Glowing Aura) */}
+                  {isValidTarget && (
+                    <>
+                      {/* Rotating Dashed Circle */}
+                      <motion.div 
+                        className={`absolute -inset-2.5 rounded-full border-4 border-dashed pointer-events-none z-10 ${
+                          showTargetModal?.type === 'FAVOR' 
+                            ? 'border-purple-500' 
+                            : showTargetModal?.type === '2-CARD' 
+                              ? 'border-orange-500' 
+                              : 'border-fuchsia-500'
+                        }`}
+                        animate={{ rotate: 360 }}
+                        transition={{ duration: 8, repeat: Infinity, ease: 'linear' }}
+                      />
+                      
+                      {/* Outer Glowing Ring */}
+                      <motion.div 
+                        className={`absolute -inset-3 rounded-full pointer-events-none z-0 opacity-70 ${
+                          showTargetModal?.type === 'FAVOR' 
+                            ? 'shadow-[0_0_20px_rgba(168,85,247,0.7)]' 
+                            : showTargetModal?.type === '2-CARD' 
+                              ? 'shadow-[0_0_20px_rgba(249,115,22,0.7)]' 
+                              : 'shadow-[0_0_20px_rgba(217,70,239,0.7)]'
+                        }`}
+                        animate={{ scale: [0.95, 1.05, 0.95] }}
+                        transition={{ duration: 1.5, repeat: Infinity, ease: 'easeInOut' }}
+                      />
+
+                      {/* Pulsing Radar Glow Backdrop */}
+                      <div 
+                        className={`absolute -inset-4 rounded-full blur-md -z-10 opacity-40 animate-pulse ${
+                          showTargetModal?.type === 'FAVOR' 
+                            ? 'bg-purple-500' 
+                            : showTargetModal?.type === '2-CARD' 
+                              ? 'bg-orange-500' 
+                              : 'bg-fuchsia-500'
+                        }`}
+                      />
+                    </>
+                  )}
+
                   {/* Glowing aura around active player circle */}
                   {isTheirTurn && !opp.isEliminated && (
                     <div className="absolute -inset-2 bg-gradient-to-r from-amber-500 to-orange-600 rounded-full blur opacity-75 animate-pulse -z-10"></div>
@@ -514,13 +597,30 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
                       🎯 TARGETED!
                     </div>
                   )}
+                  {isValidTarget && (
+                    <div 
+                      className={`absolute -top-4 border text-white font-cartoon text-[8px] px-2.5 py-0.5 rounded-full shadow-md uppercase tracking-wider animate-bounce z-30 font-bold ${
+                        showTargetModal?.type === 'FAVOR' 
+                          ? 'bg-purple-600 border-purple-400 shadow-purple-500/50' 
+                          : showTargetModal?.type === '2-CARD' 
+                            ? 'bg-orange-600 border-orange-400 shadow-orange-500/50' 
+                            : 'bg-fuchsia-600 border-fuchsia-400 shadow-fuchsia-500/50'
+                      }`}
+                    >
+                      🎯 Target
+                    </div>
+                  )}
 
                   {/* Circular Badge */}
                   <div className={`w-20 h-20 rounded-full border-2 flex items-center justify-center shadow-md relative overflow-hidden transition-all duration-300 ${circleColor} ${
-                    isTargetedByActionWindow && !opp.isEliminated
-                      ? 'ring-4 ring-red-500 animate-pulse border-red-400 scale-105 shadow-[0_0_25px_rgba(239,68,68,0.7)]'
-                      : isTargeted 
-                        ? 'ring-4 ring-amber-500/50 shadow-[0_0_20px_rgba(245,158,11,0.5)] border-amber-400 scale-105' 
+                    isValidTarget 
+                      ? showTargetModal?.type === 'FAVOR'
+                        ? 'border-purple-400 ring-2 ring-purple-500/50 shadow-[0_0_15px_rgba(168,85,247,0.5)]'
+                        : showTargetModal?.type === '2-CARD'
+                          ? 'border-orange-400 ring-2 ring-orange-500/50 shadow-[0_0_15px_rgba(249,115,22,0.5)]'
+                          : 'border-fuchsia-400 ring-2 ring-fuchsia-500/50 shadow-[0_0_15px_rgba(217,70,239,0.5)]'
+                      : isTargetedByActionWindow && !opp.isEliminated
+                        ? 'ring-4 ring-red-500 animate-pulse border-red-400 scale-105 shadow-[0_0_25px_rgba(239,68,68,0.7)]'
                         : isTheirTurn && !opp.isEliminated
                           ? 'ring-4 ring-yellow-400 animate-pulse border-yellow-300'
                           : ''
@@ -1427,8 +1527,146 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
 
       {/* Action Window Overlay */}
 
+      {/* Target Selection Instruction Banner */}
+      <AnimatePresence>
+        {showTargetModal && (
+          <motion.div
+            key="target-selection-banner"
+            initial={{ opacity: 0, y: -50, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -50, scale: 0.95 }}
+            transition={{ type: 'spring', stiffness: 120, damping: 14 }}
+            className={`absolute top-24 left-1/2 -translate-x-1/2 z-30 w-[90%] max-w-md border backdrop-blur-xl px-6 py-4 rounded-3xl flex flex-col items-center gap-3 shadow-lg pointer-events-auto text-center ${
+              showTargetModal.type === 'FAVOR'
+                ? 'bg-purple-950/80 border-purple-500/40 shadow-purple-500/30'
+                : showTargetModal.type === '2-CARD'
+                  ? 'bg-orange-950/80 border-orange-500/40 shadow-orange-500/30'
+                  : 'bg-fuchsia-950/80 border-fuchsia-500/40 shadow-fuchsia-500/30'
+            }`}
+          >
+            {/* Themed icon/indicator */}
+            <div className="flex items-center gap-2">
+              <span className="text-xl animate-bounce">
+                {showTargetModal.type === 'FAVOR' ? '🤝' : showTargetModal.type === '2-CARD' ? '🔥' : '🔮'}
+              </span>
+              <h4 className={`font-cartoon text-sm uppercase tracking-widest font-black ${
+                showTargetModal.type === 'FAVOR'
+                  ? 'text-purple-300'
+                  : showTargetModal.type === '2-CARD'
+                    ? 'text-orange-300'
+                    : 'text-fuchsia-300'
+              }`}>
+                {showTargetModal.type === 'FAVOR'
+                  ? 'Choose Favor Target'
+                  : showTargetModal.type === '2-CARD'
+                    ? 'Choose Steal Target'
+                    : 'Choose Guess Target'}
+              </h4>
+            </div>
+
+            {opponents.filter(o => !o.isEliminated && o.handCount > 0).length === 0 ? (
+              <p className="text-xs font-cartoon text-red-400 tracking-wide uppercase animate-pulse">
+                ⚠️ No valid targets available (opponents have no cards)!
+              </p>
+            ) : (
+              <p className="text-xs font-cartoon text-slate-200 tracking-wide uppercase">
+                {showTargetModal.type === 'FAVOR'
+                  ? "Tap a player's avatar above to request a Favor!"
+                  : showTargetModal.type === '2-CARD'
+                    ? "Tap a player's avatar above to steal a card!"
+                    : "Tap a player's avatar above to play 3-of-a-Kind guess!"}
+              </p>
+            )}
+
+            {/* Countdown timer & progress bar */}
+            <div className="w-full mt-1">
+              <div className="flex justify-between items-center text-[10px] font-cartoon text-slate-400 uppercase tracking-widest mb-1.5 px-1">
+                <span>⏳ Auto-selecting in:</span>
+                <span className="font-bold text-white bg-black/40 px-2 py-0.5 rounded-md border border-white/10 animate-pulse">
+                  {targetSecondsLeft}s
+                </span>
+              </div>
+              <div className="w-full h-2 bg-black/45 rounded-full overflow-hidden border border-white/5 relative">
+                <motion.div
+                  className={`h-full rounded-full ${
+                    showTargetModal.type === 'FAVOR'
+                      ? 'bg-purple-500 shadow-[0_0_10px_rgba(168,85,247,0.7)]'
+                      : showTargetModal.type === '2-CARD'
+                        ? 'bg-orange-500 shadow-[0_0_10px_rgba(249,115,22,0.7)]'
+                        : 'bg-fuchsia-500 shadow-[0_0_10px_rgba(217,70,239,0.7)]'
+                  }`}
+                  initial={{ width: '100%' }}
+                  animate={{ width: `${percentLeft}%` }}
+                  transition={{ duration: 0.2, ease: 'linear' }}
+                />
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Favor Request Overlay */}
-      {renderFavorOverlay()}
+      <AnimatePresence>
+        {isFavorVictim && favorRequester && (
+          <motion.div 
+            key="favor-overlay"
+            initial={{ opacity: 0, scale: 0.85, y: 40 }} 
+            animate={{ opacity: 1, scale: 1, y: 0 }} 
+            exit={{ opacity: 0, scale: 0.85, y: 40 }}
+            transition={{ type: 'spring', stiffness: 100, damping: 15 }}
+            className="absolute top-[35%] left-1/2 -translate-x-1/2 -translate-y-1/2 w-[90%] max-w-sm bg-purple-950/95 border border-purple-500/30 rounded-[2.5rem] p-6 shadow-[0_0_60px_rgba(168,85,247,0.4)] z-40 text-center flex flex-col items-center justify-center pointer-events-auto overflow-hidden"
+          >
+            {/* Ambient glow behind overlay */}
+            <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,_rgba(168,85,247,0.15)_0%,_transparent_80%)] pointer-events-none"></div>
+
+            <h2 className="text-2xl font-cartoon text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-fuchsia-400 mb-1 uppercase tracking-tighter italic relative z-10">
+              FAVOR REQUESTED
+            </h2>
+            <p className="text-xs text-slate-300 font-cartoon uppercase tracking-widest mb-6 relative z-10">
+              Give <span className="text-white bg-purple-500/30 px-2 py-0.5 rounded border border-purple-500/50">{favorRequester.name}</span> a card
+            </p>
+
+            <AnimatePresence mode="wait">
+              {myPlayer?.hand?.find(c => c.id === selectedCardIds[0]) ? (
+                <motion.div 
+                  key="selected-card"
+                  initial={{ scale: 0.8, opacity: 0, rotate: -10 }} 
+                  animate={{ scale: 1, opacity: 1, rotate: 0 }} 
+                  exit={{ scale: 0.8, opacity: 0, rotate: 10 }}
+                  className="flex flex-col items-center relative z-10"
+                >
+                  <div className="mb-6 drop-shadow-[0_20px_30px_rgba(0,0,0,0.5)]">
+                    <CardView card={myPlayer.hand.find(c => c.id === selectedCardIds[0])!} disabled className="w-32 h-48" />
+                  </div>
+                  <motion.button 
+                    onClick={handleGiveCard}
+                    whileHover={{ scale: 1.05, boxShadow: '0 0 30px rgba(168,85,247,0.6)' }}
+                    whileTap={{ scale: 0.95 }}
+                    className="px-8 py-3 rounded-full bg-gradient-to-r from-purple-600 to-fuchsia-600 text-white font-cartoon uppercase tracking-widest shadow-xl border border-purple-400/30"
+                  >
+                    ✨ Give "{myPlayer.hand.find(c => c.id === selectedCardIds[0])!.name}" ✨
+                  </motion.button>
+                </motion.div>
+              ) : (
+                <motion.div 
+                  key="select-msg"
+                  initial={{ y: 15, opacity: 0 }} 
+                  animate={{ y: 0, opacity: 1 }} 
+                  exit={{ y: -15, opacity: 0 }}
+                  className="text-slate-500 text-xs font-cartoon uppercase tracking-widest border border-dashed border-white/10 rounded-2xl py-6 px-4 w-full relative z-10"
+                >
+                  <motion.span
+                    animate={{ opacity: [0.5, 1, 0.5] }}
+                    transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
+                  >
+                    👇 Select a card from your hand below...
+                  </motion.span>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Kaboom (Defuse Required) Overlay */}
       <AnimatePresence>
@@ -1835,7 +2073,20 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
                {Object.values(CardType).filter(t => t !== 'EXPLODING_KITTEN').map(type => (
                  <motion.button 
                    key={type} 
-                   onClick={() => handlePlayCombo(type)} 
+                   onClick={() => {
+                     if (gameState.waitingForTarget && targetPlayerId) {
+                       onAction({ type: 'SELECT_TARGET', targetId: targetPlayerId, requestedCardType: type }, (res) => {
+                         if (res && !res.success) {
+                           setActionError(res.message);
+                         }
+                         setShowGuessModal(false);
+                         setTargetPlayerId(null);
+                         setSelectedCardIds([]);
+                       });
+                     } else {
+                       handlePlayCombo(type);
+                     }
+                   }} 
                    whileHover={{ scale: 1.08, boxShadow: '0 0 20px rgba(168,85,247,0.4)' }}
                    whileTap={{ scale: 0.95 }}
                    className="px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 hover:bg-gradient-to-r hover:from-fuchsia-600/30 hover:to-purple-600/30 hover:border-fuchsia-500/40 hover:text-white text-slate-300 text-[10px] font-cartoon uppercase tracking-wider transition-all"
