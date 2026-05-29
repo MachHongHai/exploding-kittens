@@ -3,7 +3,9 @@ import { io } from 'socket.io-client';
 import type { Socket } from 'socket.io-client';
 import type { GameState, PlayerAction } from '../../../shared/src/types';
 
-const SOCKET_URL = 'http://localhost:3001';
+const SOCKET_URL = typeof window !== 'undefined' && window.location.hostname === 'localhost'
+  ? 'http://localhost:3001'
+  : ''; // Rỗng nghĩa là kết nối về cùng một origin chứa frontend
 
 export function useGameState() {
   const [socket, setSocket] = useState<Socket | null>(null);
