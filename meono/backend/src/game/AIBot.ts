@@ -13,6 +13,12 @@ export class AIBotController {
     const player = this.game.players.find(p => p.id === botId);
     if (!player) throw new Error("Bot player not found");
 
+    // Check if bot wants to play a late Nope first (Case 5/6)
+    const lateNope = this.getLateNopeDecision(botId);
+    if (lateNope) {
+      return lateNope;
+    }
+
     // NEW: Handle being targeted by a Favor
     if (this.game.waitingForFavor?.victimId === botId) {
       const weakestCardId = this.chooseWeakestCard(player.hand);
@@ -107,13 +113,28 @@ export class AIBotController {
         const history: string[] = gameWithHistory.actionHistory;
         // Check the last 10 actions for aggression against this bot
         const recentHistory = history.slice(-10);
+        let lastActionByBot = false;
         recentHistory.forEach(action => {
-          if (action.includes(targetName) && (action.includes("played Favor on " + botName) || action.includes("played a Pair on " + botName) || action.includes("stole from " + botName))) {
+          if (action.includes(targetName) && (
+            action.includes("played Favor on " + botName) || 
+            action.includes("played a Pair on " + botName) || 
+            action.includes("Three of a kind on " + botName) || 
+            action.includes("stole from " + botName)
+          )) {
             retaliationCount++;
+          }
+          if (action.includes(`${botName} played`)) {
+            lastActionByBot = true;
+          } else if (action.includes("Nope!")) {
+            if (lastActionByBot && action.includes(targetName)) {
+              retaliationCount++;
+            }
+          } else {
+            lastActionByBot = false;
           }
         });
       }
-      score += retaliationCount * 5.0; // Add 5 points for each recent aggressive action against us
+      score += retaliationCount * 8.0; // Add 8 points for each recent aggressive action against us
 
       if (score > highestScore) {
         highestScore = score;
@@ -309,6 +330,40 @@ export class AIBotController {
       ? gameWithHistory.actionHistory.slice(-10).join('\n')
       : 'None yet';
 
+    // Compute hostile players for Gemini
+    const botName = player.name;
+    const hostilityCounts: Record<string, number> = {};
+    if (gameWithHistory.actionHistory) {
+      const history: string[] = gameWithHistory.actionHistory.slice(-15);
+      let lastActionByBot = false;
+      history.forEach(action => {
+        opponents.forEach(opp => {
+          const oppName = opp.name;
+          if (action.includes(oppName) && (
+            action.includes("played Favor on " + botName) || 
+            action.includes("played a Pair on " + botName) || 
+            action.includes("Three of a kind on " + botName) || 
+            action.includes("stole from " + botName)
+          )) {
+            hostilityCounts[oppName] = (hostilityCounts[oppName] || 0) + 1;
+          }
+          if (action.includes(`${botName} played`)) {
+            lastActionByBot = true;
+          } else if (action.includes("Nope!")) {
+            if (lastActionByBot && action.includes(oppName)) {
+              hostilityCounts[oppName] = (hostilityCounts[oppName] || 0) + 1;
+            }
+          } else {
+            lastActionByBot = false;
+          }
+        });
+      });
+    }
+
+    const hostileList = Object.entries(hostilityCounts)
+      .map(([name, count]) => `${name} (Attacked/Noped you ${count} times)`)
+      .join(', ') || 'None';
+
     const gameStateDesc = `
     - Draw pile size: ${this.game.drawPile.length}
     - Discard pile top card: ${this.game.discardPile.length > 0 ? this.game.discardPile[this.game.discardPile.length - 1].name : 'Empty'}
@@ -318,6 +373,7 @@ export class AIBotController {
 ${knownTop}
     - Recent Action History (last 10 moves):
 ${historyDesc}
+    - Hostility & Revenge (Players who targeted you recently): ${hostileList}
     - Opponents: ${JSON.stringify(opponents)}
     `;
 
@@ -461,6 +517,65 @@ ${historyDesc}
     return null;
   }
 
+  public getLateNopeDecision(botId: string): PlayerAction | null {
+    const player = this.game.players.find(p => p.id === botId);
+    if (!player || !this.game.lastNopeableAction) return null;
+
+    const nopeCard = player.hand.find(c => c.type === CardType.NOPE);
+    if (!nopeCard) return null;
+
+    const lastAction = this.game.lastNopeableAction;
+    const deckSize = this.game.drawPile.length;
+    const hasDefuse = player.hasDefuse();
+
+    // Case 5: Attack/Skip active turn change
+    if ((lastAction.type === 'ATTACK' || lastAction.type === 'SKIP') &&
+        lastAction.targetId === botId &&
+        this.game.getCurrentPlayer().id === botId) {
+      
+      // Nope the Attack/Skip if we are in danger (no Defuse or deck is late game) or 50% chance normally
+      if (!hasDefuse || deckSize <= 8 || Math.random() < 0.5) {
+        console.log(`[AIBot - LateNope] Bot ${player.name} plays late Nope to revert the ${lastAction.type}.`);
+        return { type: 'PLAY_NOPE', cardId: nopeCard.id };
+      }
+    }
+
+    // Case 6: Noping a resolved Nope (counter-noping after the window has expired)
+    if (lastAction.type === 'NOPE' &&
+        lastAction.targetId === botId &&
+        lastAction.originalAction) {
+      
+      const orig = lastAction.originalAction;
+      // Re-nope to protect valuable plays (Attack, Skip, or Combos)
+      if (orig.type === CardType.ATTACK || 
+          orig.type === CardType.SKIP || 
+          orig.actionType === '2-CARD' || 
+          orig.actionType === '3-CARD') {
+        console.log(`[AIBot - LateNope] Bot ${player.name} plays late Nope to counter player's Nope on ${orig.type}.`);
+        return { type: 'PLAY_NOPE', cardId: nopeCard.id };
+      }
+    }
+
+    // Case 4: Recent card transfer flying animation (within 1000ms)
+    if ((lastAction.type === '2-CARD' || lastAction.type === '3-CARD' || lastAction.type === 'FAVOR') &&
+        lastAction.targetId === botId &&
+        Date.now() - lastAction.timestamp < 1000 &&
+        lastAction.stolenCard) {
+      
+      const stolen = lastAction.stolenCard.card;
+      // Nope the steal if it took a valuable card (Defuse/Nope) or if we have a small hand
+      if (stolen.type === CardType.DEFUSE || 
+          stolen.type === CardType.NOPE || 
+          player.handCount <= 3 || 
+          Math.random() < 0.4) {
+        console.log(`[AIBot - LateNope] Bot ${player.name} plays late Nope to cancel card transfer of ${stolen.name}.`);
+        return { type: 'PLAY_NOPE', cardId: nopeCard.id };
+      }
+    }
+
+    return null;
+  }
+
   private takeHardRuleTurn(botId: string, requiresDefuse: boolean): PlayerAction {
     const player = this.game.players.find(p => p.id === botId)!;
 
@@ -529,13 +644,38 @@ ${historyDesc}
     const shuffleCard = hand.find(c => c.type === CardType.SHUFFLE);
     const favorCard = hand.find(c => c.type === CardType.FAVOR);
 
-    // Group cat cards / pairs
+    // Group cat cards / pairs / triplets
     const counts: Record<string, string[]> = {};
     hand.forEach(c => {
       if (!counts[c.type]) counts[c.type] = [];
       counts[c.type].push(c.id);
     });
-    const pairType = Object.keys(counts).find(type => counts[type].length >= 2);
+
+    // Check desperation mode: bomb is imminent, we have NO defuse in hand, and NO escape cards (skip, attack, shuffle)
+    const hasDefuse = player.hasDefuse();
+    const isDesperation = isBombDanger && !hasDefuse && !attackCard && !skipCard && !shuffleCard;
+
+    // Helper to find a valid combo card type
+    const getValidComboType = (minCount: number, allowValuable: boolean): string | null => {
+      // Prioritize Cat Cards first
+      const catTypes = Object.keys(counts).filter(type => type.startsWith('CAT_CARD') && counts[type].length >= minCount);
+      if (catTypes.length > 0) return catTypes[0];
+
+      // Then non-valuable functional cards
+      const otherTypes = Object.keys(counts).filter(type => {
+        if (counts[type].length < minCount) return false;
+        if (type.startsWith('CAT_CARD')) return false;
+        // Strict preservation under normal circumstances
+        if (!allowValuable && (type === CardType.DEFUSE || type === CardType.NOPE)) return false;
+        return true;
+      });
+      if (otherTypes.length > 0) return otherTypes[0];
+
+      return null;
+    };
+
+    const tripletType = getValidComboType(3, isDesperation);
+    const pairType = getValidComboType(2, isDesperation);
 
     // Find opponents and select strategic target
     const richestOpponent = this.selectStrategicTarget(botId);
@@ -578,8 +718,13 @@ ${historyDesc}
         return { type: 'PLAY_CARDS', cardIds: [shuffleCard.id] };
       }
 
-      // 4. Try to steal a defense card (Attack/Skip/Defuse) using Favor or Pairs.
+      // 4. Try to steal a defense card (Attack/Skip/Defuse) using Triplet, Pair, or Favor.
       if (richestOpponent && richestOpponent.handCount > 0) {
+        if (tripletType) {
+          const requestedType = richestOpponent.hasDefuse() ? CardType.DEFUSE : CardType.ATTACK;
+          console.log(`[AIBot - Hard] Emergency 3-of-a-kind on ${richestOpponent.name} requesting ${requestedType}.`);
+          return { type: 'PLAY_CARDS', cardIds: counts[tripletType].slice(0, 3), targetId: richestOpponent.id, requestedCardType: requestedType as any };
+        }
         if (pairType) {
           console.log(`[AIBot - Hard] Playing Pair on ${richestOpponent.name} to steal defense.`);
           return { type: 'PLAY_CARDS', cardIds: counts[pairType].slice(0, 2), targetId: richestOpponent.id };
@@ -615,6 +760,11 @@ ${historyDesc}
 
       // 3. Strategic stealing to strip opponent's defenses in the final phase
       if (richestOpponent && richestOpponent.handCount > 0) {
+        if (tripletType && Math.random() > 0.5) {
+          const requestedType = richestOpponent.hasDefuse() ? CardType.DEFUSE : CardType.ATTACK;
+          console.log(`[AIBot - Hard] End Game: Playing 3-of-a-kind on ${richestOpponent.name} requesting ${requestedType}.`);
+          return { type: 'PLAY_CARDS', cardIds: counts[tripletType].slice(0, 3), targetId: richestOpponent.id, requestedCardType: requestedType as any };
+        }
         if (pairType && Math.random() > 0.6) {
           console.log(`[AIBot - Hard] End Game: Playing Pair on ${richestOpponent.name} to strip defense.`);
           return { type: 'PLAY_CARDS', cardIds: counts[pairType].slice(0, 2), targetId: richestOpponent.id };
@@ -628,9 +778,14 @@ ${historyDesc}
 
     // Case 3d: Early/Mid Game Phase (Deck > 8 cards) - Save valuable cards!
     if (isMidGame) {
-      // 1. Use Favor and Pairs early to build hand size and steal opponent's cards.
+      // 1. Use Favor, Pairs, and Triplets early to build hand size and steal opponent's cards.
       // This is a great way to build resources for the end game.
       if (richestOpponent && richestOpponent.handCount > 0 && player.handCount > 3) {
+        if (tripletType && Math.random() > 0.3) {
+          const requestedType = richestOpponent.hasDefuse() ? CardType.DEFUSE : CardType.ATTACK;
+          console.log(`[AIBot - Hard] Mid Game: Playing 3-of-a-kind on ${richestOpponent.name} requesting ${requestedType}.`);
+          return { type: 'PLAY_CARDS', cardIds: counts[tripletType].slice(0, 3), targetId: richestOpponent.id, requestedCardType: requestedType as any };
+        }
         if (pairType && Math.random() > 0.4) {
           console.log(`[AIBot - Hard] Mid Game: Playing Pair on ${richestOpponent.name} strategically.`);
           return { type: 'PLAY_CARDS', cardIds: counts[pairType].slice(0, 2), targetId: richestOpponent.id };

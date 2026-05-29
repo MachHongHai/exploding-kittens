@@ -69,6 +69,23 @@ export interface GameState {
   };
   explodingKittensCount?: number;
   actionHistory?: string[];
+  lastNopeableAction?: {
+    type: 'ATTACK' | 'SKIP' | 'FAVOR' | '2-CARD' | '3-CARD' | 'NOPE';
+    initiatorId: string;
+    targetId: string;
+    timestamp: number;
+    stolenCard?: { card: Card; fromId: string; toId: string };
+    prevPlayerIndex?: number;
+    prevTurnsToPlay?: number;
+    originalAction?: {
+      type: CardType;
+      playerId: string;
+      actionType: '1-CARD' | '2-CARD' | '3-CARD';
+      cards: Card[];
+      targetId?: string;
+      requestedCardType?: CardType;
+    };
+  } | null;
 }
 
 export type PlayerAction = 

@@ -26,7 +26,7 @@ IMPORTANT RULES:
 - To end your turn normally, choose the 'DRAW_CARD' action.
 - If you have functional cards (Favor, See The Future, Shuffle) or Pairs, try to play them BEFORE you draw.
 - If you choose 'PLAY_CARDS', you must provide an array of exactly 'cardIds' from your hand.
-- If playing a FAVOR or a Pair (2 identical Cat cards), provide the 'targetId' of an opponent.
+- If playing a FAVOR, a Pair (2 identical cards), or Three of a Kind (3 identical cards), provide the 'targetId' of an opponent.
 
 ADVANCED TACTICAL INSIGHTS & TRICKS:
 1. SAFE DRAW (SAVE YOUR CARDS): Pay extreme attention to the "Cards you know at the top of the draw pile". If you KNOW the top card is safe (not an Exploding Kitten), NEVER play Skip, Attack, or Shuffle. Simply choose DRAW_CARD to hoard your valuable defense cards.
@@ -34,8 +34,16 @@ ADVANCED TACTICAL INSIGHTS & TRICKS:
    - Priority 1: ATTACK (ends turn, forces next player to take 2 turns). Best if the next player has no Defuse!
    - Priority 2: SKIP (ends 1 turn without drawing).
    - Priority 3: SHUFFLE (randomizes the deck to hopefully move the bomb).
-3. STEALING (FAVOR & PAIRS): Always target opponents who have a large hand or opponents who have a Defuse card. Cat cards MUST be played as Pairs (2 cards of exactly the same type) to steal from a target.
-4. SMART DEFUSING: If you draw a bomb, you must choose 'action': 'DEFUSE'.
+3. STEALING (FAVOR, PAIRS & THREE OF A KIND):
+   - Pairs (2 cards of exactly the same type): Play to steal a random card from a target opponent.
+   - Three of a Kind (3 cards of exactly the same type): Play to request a SPECIFIC card type from a target opponent. You MUST set "requestedCardType" to the card type you want (e.g. "DEFUSE" to steal a player's Defuse card, which is highly recommended).
+4. REVENGE & TARGET SELECTION:
+   - Look at the "Hostility & Revenge" list. If an opponent recently attacked you (stole your card, played Favor, or Noped your card), prioritize targeting them for your steals (Pairs, Triplets, Favors) to retaliate and disable their strategy.
+   - Otherwise, target players with large hands or players holding a Defuse card.
+5. STRICT CONSERVATION OF DEFUSE & NOPE CARDS:
+   - NEVER play DEFUSE or NOPE cards in a 2-card (Pair) or 3-card (Three of a Kind) combo under normal conditions. They are far too valuable as survival tools.
+   - EXCEPTION (DESPERATION MODE): If you are about to draw a known bomb, have NO Defuse card left to save you, and have NO individual escape cards (Skip/Attack/Shuffle) in hand, you may use any combo (including Defuses/Nopes) as a desperate attempt to steal an escape card from an opponent.
+6. SMART DEFUSING: If you draw a bomb, you must choose 'action': 'DEFUSE'.
    - Check the next player's status! If the next player HAS NO DEFUSE card, insert the bomb at index 0 (top of the deck) to eliminate them instantly.
    - If the next player HAS a Defuse card, insert the bomb deeper (e.g., index 2 or 3) to stall for time and keep yourself safe on your next turns.
 

@@ -44,6 +44,23 @@ export class Game {
   } | null = null;
   public lastDefuseAction: { playerId: string; drawsSinceDefuse: number } | null = null;
   public bombCountdown: number | undefined;
+  public lastNopeableAction: {
+    type: 'ATTACK' | 'SKIP' | 'FAVOR' | '2-CARD' | '3-CARD' | 'NOPE';
+    initiatorId: string;
+    targetId: string;
+    timestamp: number;
+    stolenCard?: { card: Card; fromId: string; toId: string };
+    prevPlayerIndex?: number;
+    prevTurnsToPlay?: number;
+    originalAction?: {
+      type: CardType;
+      playerId: string;
+      actionType: '1-CARD' | '2-CARD' | '3-CARD';
+      cards: Card[];
+      targetId?: string;
+      requestedCardType?: CardType;
+    };
+  } | null = null;
 
   constructor(id: string) {
     this.id = id;
@@ -152,7 +169,8 @@ export class Game {
     const player = this.getCurrentPlayer();
     if (player.id !== playerId) return { success: false, message: "Not your turn" };
 
-    this.lastTheft = null; 
+    this.lastTheft = null;
+    this.lastNopeableAction = null; 
 
     if (!cardIds || cardIds.length === 0) return { success: false, message: "No cards selected" };
 
@@ -238,24 +256,193 @@ export class Game {
   }
 
   playNope(playerId: string, cardId: string): { success: boolean; message?: string } {
-    if (!this.pendingAction) return { success: false, message: "No action to Nope!" };
-    if (this.pendingAction.lastNoperId === playerId) return { success: false, message: "You cannot Nope your own Nope!" };
-    
     const player = this.players.find(p => p.id === playerId);
     if (!player) return { success: false, message: "Player not found" };
 
     const nopeCard = player.hand.find(c => c.id === cardId && c.type === CardType.NOPE);
     if (!nopeCard) return { success: false, message: "Nope card not found in hand" };
 
-    player.removeCard(nopeCard.id);
-    this.discardPile.push(nopeCard);
+    // Case 1: Standard pending action window (within 5s)
+    if (this.pendingAction) {
+      if (this.pendingAction.lastNoperId === playerId) return { success: false, message: "You cannot Nope your own Nope!" };
+      
+      player.removeCard(nopeCard.id);
+      this.discardPile.push(nopeCard);
+      this.pendingAction.nopeCount++;
+      this.pendingAction.lastNoperId = playerId;
+      this.pendingAction.expiresAt = Date.now() + 5000;
+      this.lastAction = `${player.name} played Nope! (Total Nopes: ${this.pendingAction.nopeCount})`;
+      return { success: true };
+    }
 
-    this.pendingAction.nopeCount++;
-    this.pendingAction.lastNoperId = playerId;
-    this.pendingAction.expiresAt = Date.now() + 5000;
-    
-    this.lastAction = `${player.name} played Nope! (Total Nopes: ${this.pendingAction.nopeCount})`;
-    return { success: true };
+    // Case 2: Active waitingForFavor (victim plays Nope)
+    if (this.waitingForFavor && this.waitingForFavor.victimId === playerId) {
+      player.removeCard(nopeCard.id);
+      this.discardPile.push(nopeCard);
+      const requester = this.players.find(p => p.id === this.waitingForFavor!.requesterId);
+      this.lastAction = `${player.name} NOPED the Favor from ${requester?.name || 'opponent'}!`;
+      this.waitingForFavor = null;
+      return { success: true };
+    }
+
+    // Case 3: Active waitingForSteal (victim plays Nope)
+    if (this.waitingForSteal && this.waitingForSteal.victimId === playerId) {
+      player.removeCard(nopeCard.id);
+      this.discardPile.push(nopeCard);
+      const stealer = this.players.find(p => p.id === this.waitingForSteal!.stealerId);
+      this.lastAction = `${player.name} NOPED the Steal from ${stealer?.name || 'opponent'}!`;
+      this.waitingForSteal = null;
+      return { success: true };
+    }
+
+    // Case 4: Recent card transfer flying animation (within 1000ms)
+    if (this.lastNopeableAction && 
+        (this.lastNopeableAction.type === '2-CARD' || this.lastNopeableAction.type === '3-CARD' || this.lastNopeableAction.type === 'FAVOR') &&
+        this.lastNopeableAction.targetId === playerId &&
+        Date.now() - this.lastNopeableAction.timestamp < 1000 &&
+        this.lastNopeableAction.stolenCard) {
+      
+      player.removeCard(nopeCard.id);
+      this.discardPile.push(nopeCard);
+
+      // Revert card transfer
+      const { card, fromId, toId } = this.lastNopeableAction.stolenCard;
+      const receiver = this.players.find(p => p.id === toId);
+      const originalOwner = this.players.find(p => p.id === fromId);
+      if (receiver && originalOwner) {
+        receiver.removeCard(card.id);
+        originalOwner.drawCard(card);
+      }
+
+      const initiator = this.players.find(p => p.id === this.lastNopeableAction!.initiatorId);
+      this.lastAction = `${player.name} NOPED and cancelled the card transfer from ${initiator?.name || 'opponent'}!`;
+      this.lastNopeableAction = null;
+      return { success: true };
+    }
+
+    // Case 5: Attack/Skip active turn change (current player plays Nope before drawing/playing)
+    if (this.lastNopeableAction && 
+        (this.lastNopeableAction.type === 'ATTACK' || this.lastNopeableAction.type === 'SKIP') &&
+        this.currentPlayerIndex === this.players.findIndex(p => p.id === playerId) &&
+        this.lastNopeableAction.prevPlayerIndex !== undefined &&
+        this.lastNopeableAction.prevTurnsToPlay !== undefined) {
+      
+      player.removeCard(nopeCard.id);
+      this.discardPile.push(nopeCard);
+
+      // Revert turn and turnsToPlay
+      this.currentPlayerIndex = this.lastNopeableAction.prevPlayerIndex;
+      this.players[this.currentPlayerIndex].turnsToPlay = this.lastNopeableAction.prevTurnsToPlay;
+
+      const initiator = this.players.find(p => p.id === this.lastNopeableAction!.initiatorId);
+      this.lastAction = `${player.name} NOPED the ${this.lastNopeableAction.type}! Turn reverts to ${initiator?.name || 'previous player'}.`;
+      this.lastNopeableAction = null;
+      return { success: true };
+    }
+
+    // Case 6: Noping a resolved Nope (counter-noping after the window has expired)
+    if (this.lastNopeableAction &&
+        this.lastNopeableAction.type === 'NOPE' &&
+        this.lastNopeableAction.originalAction) {
+      
+      player.removeCard(nopeCard.id);
+      this.discardPile.push(nopeCard);
+
+      const orig = this.lastNopeableAction.originalAction;
+      this.lastAction = `${player.name} NOPED the Nope! Reinstating ${orig.type}.`;
+      this.lastNopeableAction = null;
+
+      // Re-execute original action
+      if (orig.type === CardType.ATTACK) {
+        const attackPrevIndex = this.currentPlayerIndex;
+        const attackPrevTurns = this.players[this.currentPlayerIndex].turnsToPlay;
+        this.players[this.currentPlayerIndex].turnsToPlay = 0;
+        this.nextTurn();
+        const nextPlayer = this.getCurrentPlayer();
+        nextPlayer.turnsToPlay = nextPlayer.turnsToPlay === 1 ? 2 : nextPlayer.turnsToPlay + 2;
+
+        this.lastNopeableAction = {
+          type: 'ATTACK',
+          initiatorId: orig.playerId,
+          targetId: nextPlayer.id,
+          timestamp: Date.now(),
+          prevPlayerIndex: attackPrevIndex,
+          prevTurnsToPlay: attackPrevTurns
+        };
+      } else if (orig.type === CardType.SKIP) {
+        const skipPrevIndex = this.currentPlayerIndex;
+        const skipPrevTurns = this.players[this.currentPlayerIndex].turnsToPlay;
+        this.players[this.currentPlayerIndex].turnsToPlay -= 1;
+        if (this.players[this.currentPlayerIndex].turnsToPlay <= 0) this.nextTurn();
+
+        this.lastNopeableAction = {
+          type: 'SKIP',
+          initiatorId: orig.playerId,
+          targetId: this.getCurrentPlayer().id,
+          timestamp: Date.now(),
+          prevPlayerIndex: skipPrevIndex,
+          prevTurnsToPlay: skipPrevTurns
+        };
+      } else if (orig.type === CardType.FAVOR) {
+        const target = this.players.find(p => p.id === orig.targetId);
+        if (target && target.handCount > 0) {
+          this.waitingForFavor = { requesterId: orig.playerId, victimId: target.id };
+        }
+      } else if (orig.actionType === '2-CARD') {
+        const target = this.players.find(p => p.id === orig.targetId);
+        const origPlayer = this.players.find(p => p.id === orig.playerId);
+        if (target && target.handCount > 0 && origPlayer) {
+          if (!origPlayer.isBot) {
+            this.waitingForSteal = { stealerId: orig.playerId, victimId: target.id, count: 1 };
+          } else {
+            const stolenCard = target.hand.splice(Math.floor(Math.random() * target.handCount), 1)[0];
+            origPlayer.drawCard(stolenCard);
+            this.lastAction = `${origPlayer.name} played a Pair and stole from ${target.name}.`;
+            this.lastTheft = { stealerId: orig.playerId, victimId: target.id, cardId: stolenCard.id };
+
+            this.lastNopeableAction = {
+              type: '2-CARD',
+              initiatorId: orig.playerId,
+              targetId: target.id,
+              timestamp: Date.now(),
+              stolenCard: {
+                card: stolenCard,
+                fromId: target.id,
+                toId: orig.playerId
+              }
+            };
+          }
+        }
+      } else if (orig.actionType === '3-CARD') {
+        const target = this.players.find(p => p.id === orig.targetId);
+        const origPlayer = this.players.find(p => p.id === orig.playerId);
+        if (target && target.handCount > 0 && orig.requestedCardType && origPlayer) {
+          const idx = target.hand.findIndex(c => c.type === orig.requestedCardType);
+          if (idx !== -1) {
+            const stolenCard = target.hand.splice(idx, 1)[0];
+            origPlayer.drawCard(stolenCard);
+            this.lastAction = `${origPlayer.name} successfully guessed ${orig.requestedCardType} from ${target.name}!`;
+            this.lastTheft = { stealerId: orig.playerId, victimId: target.id, cardId: stolenCard.id };
+
+            this.lastNopeableAction = {
+              type: '3-CARD',
+              initiatorId: orig.playerId,
+              targetId: target.id,
+              timestamp: Date.now(),
+              stolenCard: {
+                card: stolenCard,
+                fromId: target.id,
+                toId: orig.playerId
+              }
+            };
+          }
+        }
+      }
+
+      return { success: true };
+    }
+
+    return { success: false, message: "Too late to Nope!" };
   }
 
   resolvePendingAction() {
@@ -271,6 +458,21 @@ export class Game {
 
     if (isNoped) {
       this.lastAction = `${player.name}'s ${action.actionName} was NOPED!`;
+      
+      this.lastNopeableAction = {
+        type: 'NOPE',
+        initiatorId: action.lastNoperId || '',
+        targetId: action.playerId,
+        timestamp: Date.now(),
+        originalAction: {
+          type: action.cards[0].type,
+          playerId: action.playerId,
+          actionType: action.actionType,
+          cards: action.cards,
+          targetId: action.targetId,
+          requestedCardType: action.requestedCardType
+        }
+      };
       return;
     }
 
@@ -278,18 +480,45 @@ export class Game {
     if (action.actionType === '1-CARD') {
       const card = action.cards[0];
       switch (card.type) {
-        case CardType.ATTACK:
+        case CardType.ATTACK: {
+          const attackPrevIndex = this.currentPlayerIndex;
+          const attackPrevTurns = player.turnsToPlay;
+
           this.lastAction = `${player.name} played Attack!`;
           player.turnsToPlay = 0;
           this.nextTurn();
           const nextPlayer = this.getCurrentPlayer();
           nextPlayer.turnsToPlay = nextPlayer.turnsToPlay === 1 ? 2 : nextPlayer.turnsToPlay + 2;
+
+          this.lastNopeableAction = {
+            type: 'ATTACK',
+            initiatorId: player.id,
+            targetId: nextPlayer.id,
+            timestamp: Date.now(),
+            prevPlayerIndex: attackPrevIndex,
+            prevTurnsToPlay: attackPrevTurns
+          };
           break;
-        case CardType.SKIP:
+        }
+        case CardType.SKIP: {
+          const skipPrevIndex = this.currentPlayerIndex;
+          const skipPrevTurns = player.turnsToPlay;
+
           this.lastAction = `${player.name} played Skip!`;
           player.turnsToPlay -= 1;
-          if (player.turnsToPlay <= 0) this.nextTurn();
+          const endedTurn = player.turnsToPlay <= 0;
+          if (endedTurn) this.nextTurn();
+
+          this.lastNopeableAction = {
+            type: 'SKIP',
+            initiatorId: player.id,
+            targetId: this.getCurrentPlayer().id,
+            timestamp: Date.now(),
+            prevPlayerIndex: skipPrevIndex,
+            prevTurnsToPlay: skipPrevTurns
+          };
           break;
+        }
         case CardType.SHUFFLE:
           this.lastAction = `${player.name} played Shuffle!`;
           this.drawPile = shuffleDeck(this.drawPile);
@@ -326,6 +555,18 @@ export class Game {
           player.drawCard(stolenCard);
           this.lastAction = `${player.name} played a Pair and stole from ${target.name}.`;
           this.lastTheft = { stealerId: player.id, victimId: target.id, cardId: stolenCard.id };
+
+          this.lastNopeableAction = {
+            type: '2-CARD',
+            initiatorId: player.id,
+            targetId: target.id,
+            timestamp: Date.now(),
+            stolenCard: {
+              card: stolenCard,
+              fromId: target.id,
+              toId: player.id
+            }
+          };
         }
       }
     } else if (action.actionType === '3-CARD') {
@@ -337,6 +578,18 @@ export class Game {
           player.drawCard(stolenCard);
           this.lastAction = `${player.name} successfully guessed ${action.requestedCardType} from ${target.name}!`;
           this.lastTheft = { stealerId: player.id, victimId: target.id, cardId: stolenCard.id };
+
+          this.lastNopeableAction = {
+            type: '3-CARD',
+            initiatorId: player.id,
+            targetId: target.id,
+            timestamp: Date.now(),
+            stolenCard: {
+              card: stolenCard,
+              fromId: target.id,
+              toId: player.id
+            }
+          };
         }
       }
     }
@@ -352,6 +605,19 @@ export class Game {
     this.lastAction = `${stealer.name} picked a card from ${victim.name}.`;
     this.lastTheft = { stealerId, victimId, cardId: card.id };
     this.waitingForSteal = null;
+
+    this.lastNopeableAction = {
+      type: '2-CARD',
+      initiatorId: stealerId,
+      targetId: victimId,
+      timestamp: Date.now(),
+      stolenCard: {
+        card,
+        fromId: victimId,
+        toId: stealerId
+      }
+    };
+
     return true;
   }
 
@@ -370,6 +636,18 @@ export class Game {
     this.lastAction = `${victim.name} gave a card to ${requester.name} (Favor).`;
     this.lastTheft = { stealerId: requesterId, victimId, cardId: card.id };
     this.waitingForFavor = null;
+
+    this.lastNopeableAction = {
+      type: 'FAVOR',
+      initiatorId: requesterId,
+      targetId: victimId,
+      timestamp: Date.now(),
+      stolenCard: {
+        card,
+        fromId: victimId,
+        toId: requesterId
+      }
+    };
     
     return true;
   }
@@ -380,6 +658,7 @@ export class Game {
     if (player.id !== playerId) return 'SAFE';
 
     this.lastTheft = null;
+    this.lastNopeableAction = null; // Clear nopeable actions
     const card = this.drawPile.pop();
     if (!card) return 'SAFE';
 
@@ -478,6 +757,7 @@ export class Game {
       waitingForSteal: this.waitingForSteal || undefined,
       waitingForFavor: this.waitingForFavor || undefined,
       lastTheft: this.lastTheft || undefined,
+      lastNopeableAction: this.lastNopeableAction,
       futureCards: this.playerSeeingFuture === playerId ? this.drawPile.slice(-3).reverse() : undefined,
       actionWindow: this.pendingAction ? {
         actionId: this.pendingAction.actionId,

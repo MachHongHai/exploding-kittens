@@ -50,9 +50,45 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
   // Theft animation logic (for when I'M being stolen from BLINDLY via Pairs)
   const isBeingStolenFrom = gameState.lastTheft?.victimId === socketId && !gameState.waitingForFavor;
 
+  // Helper properties to identify any valid Nope opportunity
+  const nopeCard = myPlayer?.hand?.find(c => c.type === CardType.NOPE);
+  const isWindowActive = !!gameState.actionWindow && !(gameState.actionWindow.initiatorId === socketId && gameState.actionWindow.nopeCount === 0) && gameState.actionWindow.lastNoperId !== socketId;
+  
+  // Late Nope opportunities (after action window has resolved)
+  const isAttackOrSkipNopeable = !!gameState.lastNopeableAction &&
+    (gameState.lastNopeableAction.type === 'ATTACK' || gameState.lastNopeableAction.type === 'SKIP') &&
+    gameState.currentPlayerId === socketId;
+
+  const isResolvedNopeNopeable = !!gameState.lastNopeableAction &&
+    gameState.lastNopeableAction.type === 'NOPE' &&
+    gameState.lastNopeableAction.initiatorId !== socketId;
+
+  const isStealOrFavorNopeable = !!gameState.lastNopeableAction &&
+    (gameState.lastNopeableAction.type === '2-CARD' || 
+     gameState.lastNopeableAction.type === '3-CARD' || 
+     gameState.lastNopeableAction.type === 'FAVOR') &&
+    gameState.lastNopeableAction.targetId === socketId;
+  
+  const isNopeOpportunity = isWindowActive || 
+    (gameState.waitingForFavor?.victimId === socketId) || 
+    (gameState.waitingForSteal?.victimId === socketId) || 
+    isBeingStolenFrom || 
+    isAttackOrSkipNopeable ||
+    isResolvedNopeNopeable ||
+    isStealOrFavorNopeable;
+
   const toggleCardSelection = (cardId: string) => {
     setActionError(null);
-    if (isExploding || isStealer || isSeeingFuture || gameState.actionWindow) return;
+
+    // Quick-play Nope card directly from hand during any active Nope opportunity
+    if (isNopeOpportunity && nopeCard && cardId === nopeCard.id) {
+      onAction({ type: 'PLAY_NOPE', cardId: nopeCard.id });
+      return;
+    }
+
+    if (gameState.actionWindow) return; // Block other card clicks during the action window
+
+    if (isExploding || isStealer || isSeeingFuture) return;
     
     // If being asked for a favor, select the card to give
     if (isFavorVictim) {
@@ -83,61 +119,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
   };
 
   const renderActionWindow = () => {
-    const showWindow = gameState.actionWindow && !(gameState.actionWindow.initiatorId === socketId && gameState.actionWindow.nopeCount === 0);
-    const nopeCard = myPlayer?.hand?.find(c => c.type === CardType.NOPE);
-
-    return (
-      <AnimatePresence>
-        {showWindow && (() => {
-          const { actionName, nopeCount, targetName } = gameState.actionWindow!;
-          const isNoped = nopeCount % 2 !== 0;
-
-          return (
-            <motion.div 
-              key="action-window-modal"
-              initial={{ opacity: 0, scale: 0.9, y: 30 }} 
-              animate={{ opacity: 1, scale: 1, y: 0 }} 
-              exit={{ opacity: 0, scale: 0.9, y: 30 }}
-              className={`absolute top-[35%] left-1/2 -translate-x-1/2 -translate-y-1/2 w-[90%] max-w-sm p-6 rounded-[2.5rem] border shadow-[0_0_50px_rgba(0,0,0,0.8)] z-[70] flex flex-col items-center pointer-events-auto backdrop-blur-md ${isNoped ? 'bg-red-950/80 border-red-500/30' : 'bg-slate-950/85 border-blue-500/30'}`}
-            >
-              <h2 className="text-2xl font-cartoon text-white mb-1 uppercase tracking-tighter italic">
-                {isNoped ? "NOPED!" : "YUPPED!"}
-              </h2>
-              <div className="text-sm font-cartoon text-slate-300 mb-4 uppercase tracking-widest text-center">
-                Action: <span className="text-orange-400">{actionName}</span> {targetName && `on ${targetName}`}
-              </div>
-              
-              <div className="text-xs font-cartoon mb-3">
-                Status: <span className={isNoped ? 'text-red-500' : 'text-emerald-500'}>{isNoped ? 'CANCELLED' : 'PROCEEDING'}</span>
-                <span className="text-slate-400 font-cartoon ml-2">(Nopes: {nopeCount})</span>
-              </div>
-
-              {/* Simple progress bar mock */}
-              <div className="w-full h-1.5 bg-white/10 rounded-full overflow-hidden mb-4">
-                 <motion.div 
-                    className="h-full bg-blue-500" 
-                    initial={{ width: "100%" }} 
-                    animate={{ width: "0%" }} 
-                    transition={{ duration: 5, ease: "linear" }}
-                    key={nopeCount} // Reset animation when nopeCount changes
-                 />
-              </div>
-
-              <div className="flex gap-4 justify-center w-full">
-                 <button 
-                   disabled={!nopeCard}
-                   onClick={() => nopeCard && onAction({ type: 'PLAY_NOPE', cardId: nopeCard.id })}
-                   className={`w-full py-2.5 rounded-full font-cartoon uppercase text-xs tracking-wider transition-all ${nopeCard ? 'bg-red-600 hover:bg-red-500 text-white shadow-[0_0_20px_rgba(220,38,38,0.4)] hover:scale-105 active:scale-95' : 'bg-white/5 text-slate-600 cursor-not-allowed'}`}
-                 >
-                   NOPE! {nopeCard && '🃏'}
-                 </button>
-              </div>
-              {!nopeCard && <p className="text-slate-500 text-[8px] mt-2 uppercase tracking-widest font-cartoon">You don't have a Nope card</p>}
-            </motion.div>
-          );
-        })()}
-      </AnimatePresence>
-    );
+    return null;
   };
 
   const renderFavorOverlay = () => {
@@ -1007,9 +989,6 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
       {gameState.status === 'PLAYING' && !myPlayer?.isEliminated && (
         <div className="absolute bottom-6 right-10 z-[80] pointer-events-auto">
           {(() => {
-            const nopeCard = myPlayer?.hand?.find(c => c.type === CardType.NOPE);
-            const isWindowActive = !!gameState.actionWindow && !(gameState.actionWindow.initiatorId === socketId && gameState.actionWindow.nopeCount === 0) && gameState.actionWindow.lastNoperId !== socketId;
-            
             let btnStyle = "";
             let statusText = "Standby";
             let clickHandler = () => {};
@@ -1018,7 +997,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
             if (!nopeCard) {
               btnStyle = "bg-slate-950/60 text-slate-600 border border-slate-900 cursor-not-allowed opacity-50";
               statusText = "No Nope";
-            } else if (isWindowActive) {
+            } else if (isNopeOpportunity) {
               btnStyle = "bg-gradient-to-br from-red-500 to-red-700 hover:from-red-400 hover:to-red-600 text-white shadow-[0_0_40px_rgba(220,38,38,0.9)] border-2 border-red-400 animate-pulse cursor-pointer scale-110";
               statusText = "PLAY NOPE!";
               clickHandler = () => onAction({ type: 'PLAY_NOPE', cardId: nopeCard.id });
