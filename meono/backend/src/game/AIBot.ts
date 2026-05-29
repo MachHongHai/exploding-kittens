@@ -88,6 +88,111 @@ export class AIBotController {
     return null;
   }
 
+  private getBestCardTypeToRequest(target: any, preferredType?: CardType): CardType {
+    if (!target || target.handCount === 0) return CardType.DEFUSE;
+
+    const targetTypes = target.hand.map((c: any) => c.type);
+
+    // If a preferred type is specified and target has it, return it
+    if (preferredType && targetTypes.includes(preferredType)) {
+      return preferredType;
+    }
+
+    // Strategic priority list
+    const priority = [
+      CardType.DEFUSE,
+      CardType.NOPE,
+      CardType.ATTACK,
+      CardType.SKIP,
+      CardType.SHUFFLE,
+      CardType.SEE_THE_FUTURE,
+      CardType.FAVOR
+    ];
+
+    for (const type of priority) {
+      if (targetTypes.includes(type)) {
+        return type as CardType;
+      }
+    }
+
+    // Fallback: Return any cat card they have
+    const catCard = target.hand.find((c: any) => c.type.startsWith('CAT_CARD'));
+    if (catCard) return catCard.type as CardType;
+
+    return target.hand[0].type as CardType;
+  }
+
+  /**
+   * SAFETY NET: If the bot KNOWS a bomb is on top, try absolutely anything to avoid drawing.
+   * This prevents the bot from 'forgetting' bomb knowledge after playing combos.
+   * Called as a fallback before every DRAW_CARD return when bomb is confirmed on top.
+   */
+  private getLastResortAction(botId: string): PlayerAction | null {
+    const player = this.game.players.find(p => p.id === botId)!;
+    const hand = player.hand;
+    const isBombOnTop = player.knownDeckTop.length > 0 &&
+                        player.knownDeckTop[0].cardType === CardType.EXPLODING_KITTEN;
+
+    if (!isBombOnTop) return null; // Only engage if bomb is CONFIRMED on top
+
+    // Re-scan hand for ANY escape/utility card (the bot may have stolen one via a combo!)
+    const attack = hand.find(c => c.type === CardType.ATTACK);
+    if (attack) {
+      console.log(`[Expert SAFETY] ${player.name}: Found stolen Attack! Using it to escape bomb.`);
+      return { type: 'PLAY_CARDS', cardIds: [attack.id] };
+    }
+
+    const skip = hand.find(c => c.type === CardType.SKIP);
+    if (skip) {
+      console.log(`[Expert SAFETY] ${player.name}: Found stolen Skip! Using it to dodge bomb.`);
+      return { type: 'PLAY_CARDS', cardIds: [skip.id] };
+    }
+
+    const shuffle = hand.find(c => c.type === CardType.SHUFFLE);
+    if (shuffle) {
+      console.log(`[Expert SAFETY] ${player.name}: Found Shuffle! Randomizing bomb position.`);
+      return { type: 'PLAY_CARDS', cardIds: [shuffle.id] };
+    }
+
+    // Try any remaining combo (pairs/triplets) to steal one more card
+    const counts: Record<string, string[]> = {};
+    hand.forEach(c => {
+      if (!counts[c.type]) counts[c.type] = [];
+      counts[c.type].push(c.id);
+    });
+    const target = this.selectStrategicTarget(botId);
+    if (target && target.handCount > 0) {
+      // Try triplet (including action cards as desperate combo fodder)
+      const tripletType = this.getValidComboType(counts, 3, true);
+      if (tripletType) {
+        const requestedType = this.getBestCardTypeToRequest(target, CardType.ATTACK);
+        console.log(`[Expert SAFETY] ${player.name}: Last resort 3-of-a-kind for ${requestedType} from ${target.name}!`);
+        return { type: 'PLAY_CARDS', cardIds: counts[tripletType].slice(0, 3), targetId: target.id, requestedCardType: requestedType as any };
+      }
+      // Try pair
+      const pairType = this.getValidComboType(counts, 2, true);
+      if (pairType) {
+        console.log(`[Expert SAFETY] ${player.name}: Last resort pair steal from ${target.name}!`);
+        return { type: 'PLAY_CARDS', cardIds: counts[pairType].slice(0, 2), targetId: target.id };
+      }
+      // Try favor
+      const favor = hand.find(c => c.type === CardType.FAVOR);
+      if (favor) {
+        console.log(`[Expert SAFETY] ${player.name}: Last resort Favor on ${target.name}!`);
+        return { type: 'PLAY_CARDS', cardIds: [favor.id], targetId: target.id };
+      }
+    }
+
+    // Try See The Future (won't save us, but buys info for next turn — better than nothing)
+    const stf = hand.find(c => c.type === CardType.SEE_THE_FUTURE);
+    if (stf) {
+      console.log(`[Expert SAFETY] ${player.name}: Playing See The Future as stall tactic.`);
+      return { type: 'PLAY_CARDS', cardIds: [stf.id] };
+    }
+
+    return null; // Truly nothing left
+  }
+
   private selectStrategicTarget(botId: string): any {
     const opponents = this.game.players.filter(p => p.id !== botId && !p.isEliminated && p.handCount > 0);
     if (opponents.length === 0) return null;
@@ -231,6 +336,14 @@ export class AIBotController {
       }
       const nextPlayer = this.game.players[nextIndex];
       
+      const remainingDrawsAfterDefuse = player.turnsToPlay - 1;
+      if (remainingDrawsAfterDefuse > 0) {
+        // Safe placement: beyond remaining draws
+        const safeDepth = Math.min(remainingDrawsAfterDefuse + 1, this.game.drawPile.length);
+        console.log(`[AIBot - Medium] Under attack with ${remainingDrawsAfterDefuse} draws left. Placing bomb at safe depth ${safeDepth} to avoid self-draw.`);
+        return { type: 'DEFUSE', insertIndex: safeDepth };
+      }
+
       // Heuristic: If next player has no Defuse card, place bomb on top (index 0) to eliminate them.
       // Otherwise, place it randomly between index 1 and 3 (or deck size) to buy time.
       const hasDefuse = nextPlayer.hasDefuse();
@@ -259,6 +372,7 @@ export class AIBotController {
     const seeFutureCard = player.hand.find(c => c.type === CardType.SEE_THE_FUTURE);
     const shuffleCard = player.hand.find(c => c.type === CardType.SHUFFLE);
     const favorCard = player.hand.find(c => c.type === CardType.FAVOR);
+    const target = this.selectStrategicTarget(botId);
 
     // If top card is safe, save cards and draw!
     if (isTopCardSafe) {
@@ -276,10 +390,32 @@ export class AIBotController {
         console.log(`[AIBot - Medium] Bot ${player.name} playing shuffle under danger.`);
         return { type: 'PLAY_CARDS', cardIds: [shuffleCard.id] };
       }
+
+      // If we are in bomb danger (e.g. bomb known on top) and have no direct escape cards:
+      // Try Favor or Pair combo with 100% probability to steal an escape card (desperate defense)!
+      if (isBombDanger && target && target.handCount > 0) {
+        // Favor
+        if (favorCard) {
+          console.log(`[AIBot - Medium] DESPERATE Favor on ${target.name} to steal defense under bomb danger.`);
+          return { type: 'PLAY_CARDS', cardIds: [favorCard.id], targetId: target.id };
+        }
+        
+        // Pairs (allowing action card pairs in desperation)
+        const counts: Record<string, string[]> = {};
+        player.hand.forEach(c => {
+          if (!counts[c.type]) counts[c.type] = [];
+          counts[c.type].push(c.id);
+        });
+        const pairType = this.getValidComboType(counts, 2, true); // Allow valuable cards in desperation
+        if (pairType) {
+          console.log(`[AIBot - Medium] DESPERATE Pair on ${target.name} to steal defense under bomb danger.`);
+          return { type: 'PLAY_CARDS', cardIds: counts[pairType].slice(0, 2), targetId: target.id };
+        }
+      }
     }
 
-    // Play See The Future - save for late game or when danger is present
-    if (seeFutureCard && (isEndGame || Math.random() > 0.8)) {
+    // Play See The Future - save for late game or when danger is present, and only if memory is empty
+    if (seeFutureCard && player.knownDeckTop.length === 0 && (isEndGame || Math.random() > 0.8)) {
       console.log(`[AIBot - Medium] Playing See The Future.`);
       return { type: 'PLAY_CARDS', cardIds: [seeFutureCard.id] };
     }
@@ -290,16 +426,24 @@ export class AIBotController {
       return { type: 'PLAY_CARDS', cardIds: [shuffleCard.id] };
     }
 
-    // Combos / Stealing (Favor / Pairs) - play them strategic (use smart targeting score)
-    const target = this.selectStrategicTarget(botId);
-
-    if (target) {
-      // Pairs
+    // Combos / Stealing (Favor / Pairs / Triplets) under normal conditions
+    if (target && target.handCount > 0) {
       const counts: Record<string, string[]> = {};
       player.hand.forEach(c => {
         if (!counts[c.type]) counts[c.type] = [];
         counts[c.type].push(c.id);
       });
+
+      // Triplets (3-of-a-kind)
+      const tripletType = this.getValidComboType(counts, 3, false);
+      if (tripletType && Math.random() > 0.6) {
+        const preferred = player.hasDefuse() ? CardType.ATTACK : CardType.DEFUSE;
+        const requestedType = this.getBestCardTypeToRequest(target, preferred);
+        console.log(`[AIBot - Medium] Playing 3-of-a-kind requesting ${requestedType} from ${target.name}.`);
+        return { type: 'PLAY_CARDS', cardIds: counts[tripletType].slice(0, 3), targetId: target.id, requestedCardType: requestedType as any };
+      }
+
+      // Pairs
       const pairType = this.getValidComboType(counts, 2, false);
       if (pairType && Math.random() > 0.5) {
         console.log(`[AIBot - Medium] Playing Pair on ${target.name}.`);
@@ -313,7 +457,7 @@ export class AIBotController {
       }
     }
 
-    return { type: 'DRAW_CARD' };
+    return this.getLastResortAction(botId) || { type: 'DRAW_CARD' };
   }
 
   private async takeGeminiTurn(botId: string, requiresDefuse: boolean): Promise<PlayerAction> {
@@ -414,6 +558,14 @@ ${historyDesc}
          return { type: 'DEFUSE', insertIndex: pos };
       }
       if (decision.action === 'PLAY_CARDS' && decision.cardIds && decision.cardIds.length > 0) {
+         if (decision.cardIds.length === 3) {
+           const targetId = decision.targetId || this.selectStrategicTarget(botId)?.id;
+           const target = this.game.players.find(p => p.id === targetId);
+           const preferred = decision.requestedCardType as CardType | undefined;
+           const requestedType = this.getBestCardTypeToRequest(target, preferred);
+           console.log(`[AIBot - Gemini] Sanitized 3-of-a-kind to requested type: ${requestedType} from target: ${target?.name}`);
+           return { type: 'PLAY_CARDS', cardIds: decision.cardIds, targetId, requestedCardType: requestedType };
+         }
          return { type: 'PLAY_CARDS', cardIds: decision.cardIds, targetId: decision.targetId, requestedCardType: decision.requestedCardType as CardType | undefined };
       }
       if (decision.action === 'DRAW_CARD' && !requiresDefuse) {
@@ -690,7 +842,7 @@ ${historyDesc}
       if (!counts[c.type]) counts[c.type] = [];
       counts[c.type].push(c.id);
     });
-    const isDesperation = isDangerZone && !hasDefuse && escapeCount === 0 && shuffleCards.length === 0;
+    const isDesperation = isDangerZone && escapeCount === 0 && shuffleCards.length === 0;
     const pairType = this.getValidComboType(counts, 2, isDesperation);
     const tripletType = this.getValidComboType(counts, 3, isDesperation);
 
@@ -783,7 +935,8 @@ ${historyDesc}
       if (target && target.handCount > 0) {
         if (tripletType) {
           // Request Defuse if we don't have one, otherwise request Attack/Skip
-          const requestedType = !hasDefuse ? CardType.DEFUSE : CardType.ATTACK;
+          const preferred = !hasDefuse ? CardType.DEFUSE : CardType.ATTACK;
+          const requestedType = this.getBestCardTypeToRequest(target, preferred);
           console.log(`[Expert] ${player.name}: DESPERATE 3-of-a-kind for ${requestedType} from ${target.name}!`);
           return { type: 'PLAY_CARDS', cardIds: counts[tripletType].slice(0, 3), targetId: target.id, requestedCardType: requestedType as any };
         }
@@ -800,7 +953,7 @@ ${historyDesc}
 
       // Truly no options. Draw and hope for Defuse.
       console.log(`[Expert] ${player.name}: No options left. Drawing into danger.`);
-      return { type: 'DRAW_CARD' };
+      return this.getLastResortAction(botId) || { type: 'DRAW_CARD' };
     }
 
     // ==========================================
@@ -830,10 +983,10 @@ ${historyDesc}
       if (!hasDefuse && target && target.handCount > 0) {
         if (tripletType) {
           const defuseHolder = this.game.players.find(p => p.id !== botId && !p.isEliminated && p.hasDefuse() && p.handCount > 0);
-          if (defuseHolder) {
-            console.log(`[Expert] ${player.name}: Critical 3-of-a-kind for Defuse from ${defuseHolder.name}!`);
-            return { type: 'PLAY_CARDS', cardIds: counts[tripletType].slice(0, 3), targetId: defuseHolder.id, requestedCardType: CardType.DEFUSE as any };
-          }
+          const stealTarget = defuseHolder || target;
+          const requestedType = this.getBestCardTypeToRequest(stealTarget, CardType.DEFUSE);
+          console.log(`[Expert] ${player.name}: Critical 3-of-a-kind for ${requestedType} from ${stealTarget.name}!`);
+          return { type: 'PLAY_CARDS', cardIds: counts[tripletType].slice(0, 3), targetId: stealTarget.id, requestedCardType: requestedType as any };
         }
         if (pairType) {
           console.log(`[Expert] ${player.name}: Critical pair steal from ${target.name}.`);
@@ -853,7 +1006,7 @@ ${historyDesc}
       }
 
       console.log(`[Expert] ${player.name}: Critical draw (no options left).`);
-      return { type: 'DRAW_CARD' };
+      return this.getLastResortAction(botId) || { type: 'DRAW_CARD' };
     }
 
     // ==========================================
@@ -873,10 +1026,10 @@ ${historyDesc}
         // 3-of-a-kind to specifically steal Defuse
         if (tripletType) {
           const defuseHolder = this.game.players.find(p => p.id !== botId && !p.isEliminated && p.hasDefuse() && p.handCount > 0);
-          if (defuseHolder) {
-            console.log(`[Expert] ${player.name}: End game hunting Defuse from ${defuseHolder.name} with 3-of-a-kind.`);
-            return { type: 'PLAY_CARDS', cardIds: counts[tripletType].slice(0, 3), targetId: defuseHolder.id, requestedCardType: CardType.DEFUSE as any };
-          }
+          const stealTarget = defuseHolder || target;
+          const requestedType = this.getBestCardTypeToRequest(stealTarget, CardType.DEFUSE);
+          console.log(`[Expert] ${player.name}: End game hunting ${requestedType} from ${stealTarget.name} with 3-of-a-kind.`);
+          return { type: 'PLAY_CARDS', cardIds: counts[tripletType].slice(0, 3), targetId: stealTarget.id, requestedCardType: requestedType as any };
         }
         // Pair steal (can't choose card type, but better than nothing)
         if (pairType) {
@@ -895,8 +1048,9 @@ ${historyDesc}
       if (hasDefuse && target && target.handCount > 0) {
         if (tripletType) {
           // Steal their Nope to prevent them from blocking our plays
-          console.log(`[Expert] ${player.name}: End game stripping ${target.name}'s Nope with 3-of-a-kind.`);
-          return { type: 'PLAY_CARDS', cardIds: counts[tripletType].slice(0, 3), targetId: target.id, requestedCardType: CardType.NOPE as any };
+          const requestedType = this.getBestCardTypeToRequest(target, CardType.NOPE);
+          console.log(`[Expert] ${player.name}: End game stripping ${target.name}'s ${requestedType} with 3-of-a-kind.`);
+          return { type: 'PLAY_CARDS', cardIds: counts[tripletType].slice(0, 3), targetId: target.id, requestedCardType: requestedType as any };
         }
         if (pairType && Math.random() > 0.4) {
           console.log(`[Expert] ${player.name}: End game pair steal from ${target.name}.`);
@@ -923,7 +1077,7 @@ ${historyDesc}
       }
 
       console.log(`[Expert] ${player.name}: End game drawing (calculated risk).`);
-      return { type: 'DRAW_CARD' };
+      return this.getLastResortAction(botId) || { type: 'DRAW_CARD' };
     }
 
     // ==========================================
@@ -939,14 +1093,15 @@ ${historyDesc}
           if (!hasDefuse) {
             // Priority: steal Defuse for survival
             const defuseHolder = this.game.players.find(p => p.id !== botId && !p.isEliminated && p.hasDefuse() && p.handCount > 0);
-            if (defuseHolder) {
-              console.log(`[Expert] ${player.name}: Mid game 3-of-a-kind for Defuse from ${defuseHolder.name}.`);
-              return { type: 'PLAY_CARDS', cardIds: counts[tripletType].slice(0, 3), targetId: defuseHolder.id, requestedCardType: CardType.DEFUSE as any };
-            }
+            const stealTarget = defuseHolder || target;
+            const requestedType = this.getBestCardTypeToRequest(stealTarget, CardType.DEFUSE);
+            console.log(`[Expert] ${player.name}: Mid game 3-of-a-kind for ${requestedType} from ${stealTarget.name}.`);
+            return { type: 'PLAY_CARDS', cardIds: counts[tripletType].slice(0, 3), targetId: stealTarget.id, requestedCardType: requestedType as any };
           } else if (Math.random() > 0.4) {
             // We have Defuse already. Steal opponent's Nope to reduce their defense.
-            console.log(`[Expert] ${player.name}: Mid game 3-of-a-kind for Nope from ${target.name}.`);
-            return { type: 'PLAY_CARDS', cardIds: counts[tripletType].slice(0, 3), targetId: target.id, requestedCardType: CardType.NOPE as any };
+            const requestedType = this.getBestCardTypeToRequest(target, CardType.NOPE);
+            console.log(`[Expert] ${player.name}: Mid game 3-of-a-kind for ${requestedType} from ${target.name}.`);
+            return { type: 'PLAY_CARDS', cardIds: counts[tripletType].slice(0, 3), targetId: target.id, requestedCardType: requestedType as any };
           }
         }
         // Pair: random steal, good for resource building
@@ -977,7 +1132,7 @@ ${historyDesc}
 
       // 5e. SAVE Skip/Attack/Nope for critical moments. Just draw.
       console.log(`[Expert] ${player.name}: Mid game conserving defense cards. Drawing.`);
-      return { type: 'DRAW_CARD' };
+      return this.getLastResortAction(botId) || { type: 'DRAW_CARD' };
     }
 
     // ==========================================
@@ -994,10 +1149,11 @@ ${historyDesc}
       }
       if (tripletType && Math.random() > 0.3) {
         // Early game: steal Defuse if we don't have one, otherwise steal Attack for defense stockpile
-        const requestedType = !hasDefuse ? CardType.DEFUSE : CardType.ATTACK;
+        const preferred = !hasDefuse ? CardType.DEFUSE : CardType.ATTACK;
         const tripletTarget = !hasDefuse
           ? (this.game.players.find(p => p.id !== botId && !p.isEliminated && p.hasDefuse() && p.handCount > 0) || target)
           : target;
+        const requestedType = this.getBestCardTypeToRequest(tripletTarget, preferred);
         console.log(`[Expert] ${player.name}: Early game 3-of-a-kind for ${requestedType} from ${tripletTarget.name}.`);
         return { type: 'PLAY_CARDS', cardIds: counts[tripletType].slice(0, 3), targetId: tripletTarget.id, requestedCardType: requestedType as any };
       }
@@ -1013,6 +1169,6 @@ ${historyDesc}
     // 6c. DO NOT play Skip, Attack, Shuffle, See The Future in early game.
     // These are lifesavers in late game. Conserve them absolutely.
     console.log(`[Expert] ${player.name}: Early game safe draw. Stockpiling defense cards.`);
-    return { type: 'DRAW_CARD' };
+    return this.getLastResortAction(botId) || { type: 'DRAW_CARD' };
   }
 }

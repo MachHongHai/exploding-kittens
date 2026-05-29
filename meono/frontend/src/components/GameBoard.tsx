@@ -28,12 +28,29 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
     }
   }, [gameState.lastAction]);
 
+  // Clear action error after 3 seconds
+  useEffect(() => {
+    if (actionError) {
+      const timer = setTimeout(() => setActionError(null), 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [actionError]);
+
   const myPlayer = gameState.players.find(p => p.id === socketId);
   const opponents = gameState.players.filter(p => p.id !== socketId);
   
   const isMyTurn = gameState.currentPlayerId === socketId && gameState.status === 'PLAYING';
   const isExploding = gameState.waitingForDefuse === socketId;
   const hasDefuse = myPlayer?.hand?.some(c => c.type === CardType.DEFUSE);
+
+  const [defuseInsertIndex, setDefuseInsertIndex] = useState<number>(0);
+
+  // Reset defuse index when exploding state changes
+  useEffect(() => {
+    if (isExploding) {
+      setDefuseInsertIndex(0);
+    }
+  }, [isExploding]);
 
   // Future logic
   const isSeeingFuture = !!gameState.futureCards;
@@ -49,6 +66,9 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
 
   // Theft animation logic (for when I'M being stolen from BLINDLY via Pairs)
   const isBeingStolenFrom = gameState.lastTheft?.victimId === socketId && !gameState.waitingForFavor;
+
+  const isLocalPlayerTargeted = !!gameState.actionWindow && 
+    gameState.actionWindow.targetName === myPlayer?.name;
 
   // Helper properties to identify any valid Nope opportunity
   const nopeCard = myPlayer?.hand?.find(c => c.type === CardType.NOPE);
@@ -118,9 +138,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
     onAction({ type: 'CONFIRM_FUTURE' });
   };
 
-  const renderActionWindow = () => {
-    return null;
-  };
+
 
   const renderFavorOverlay = () => {
     const showFavor = isFavorVictim && favorRequester;
@@ -314,9 +332,10 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
         {/* Leave Game button (top-left) */}
         <button 
           onClick={() => window.location.reload()}
-          className="font-cartoon text-[10px] bg-red-950/60 text-red-200 border border-red-800/40 hover:bg-red-900/80 px-3.5 py-2 rounded-xl transition-all shadow-[0_4px_12px_rgba(0,0,0,0.5)] active:translate-y-0.5 tracking-wider uppercase shrink-0"
+          className="group relative inline-flex items-center justify-center px-5 py-2.5 font-cartoon text-xs tracking-widest text-white uppercase bg-red-950/40 border border-red-500/30 rounded-full overflow-hidden transition-all hover:bg-red-900/60 hover:scale-105 active:scale-95 shadow-[0_0_15px_rgba(220,38,38,0.2)] shrink-0 backdrop-blur-sm"
         >
-          Leave Game
+          <span className="absolute w-0 h-0 transition-all duration-300 ease-out bg-red-500 rounded-full group-hover:w-32 group-hover:h-32 opacity-20"></span>
+          <span className="relative">Leave Game</span>
         </button>
 
         {/* Opponent Row (centered & spaced out at top) */}
@@ -325,16 +344,18 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
             const isTargeted = targetPlayerId === opp.id;
             const isTheirTurn = gameState.currentPlayerId === opp.id;
             const isStealing = gameState.lastTheft?.stealerId === opp.id;
+            const isTargetedByActionWindow = !!gameState.actionWindow && 
+              gameState.actionWindow.targetName === opp.name;
 
             // Define themed styles (similar to OTHO, ADAM, BARBARA, LYDIA)
             let nameColor = "text-amber-100";
             let circleColor = "border-amber-900/60 bg-amber-950/40 text-white";
+            const themeIndex = idx % 3;
             
             if (opp.isEliminated) {
               nameColor = "text-stone-400";
               circleColor = "border-stone-600 bg-stone-900/20 opacity-50 text-stone-500";
             } else {
-              const themeIndex = idx % 3;
               if (themeIndex === 0) {
                 // OTHO (Green Theme)
                 nameColor = "text-[#4ade80]";
@@ -369,36 +390,79 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
                     <div className="absolute -inset-2 bg-gradient-to-r from-amber-500 to-orange-600 rounded-full blur opacity-75 animate-pulse -z-10"></div>
                   )}
 
-                  {/* Turn Indicator Badge */}
+                  {/* Glowing aura around targeted player circle under action window */}
+                  {isTargetedByActionWindow && !opp.isEliminated && (
+                    <div className="absolute -inset-3 bg-red-600 rounded-full blur opacity-75 animate-ping -z-10"></div>
+                  )}
+
+                  {/* Turn/Target Indicator Badge */}
                   {isTheirTurn && !opp.isEliminated && (
-                    <div className="absolute -top-4 bg-orange-600 border border-orange-400 text-white font-cartoon text-[8px] px-2 py-0.5 rounded-full shadow-md uppercase tracking-wider animate-bounce z-30">
+                    <div className="absolute -top-4 bg-orange-600 border border-orange-400 text-white font-cartoon text-[8px] px-2 py-0.5 rounded-full shadow-md uppercase tracking-wider animate-bounce z-30 font-bold">
                       TURNS: {opp.turnsToPlay}
+                    </div>
+                  )}
+                  {isTargetedByActionWindow && !opp.isEliminated && !isTheirTurn && (
+                    <div className="absolute -top-4 bg-red-600 border border-red-400 text-white font-cartoon text-[8px] px-2 py-0.5 rounded-full shadow-md uppercase tracking-wider animate-pulse z-30 font-bold">
+                      🎯 TARGETED!
                     </div>
                   )}
 
                   {/* Circular Badge */}
                   <div className={`w-20 h-20 rounded-full border-2 flex items-center justify-center shadow-md relative overflow-hidden transition-all duration-300 ${circleColor} ${
-                    isTargeted 
-                      ? 'ring-4 ring-amber-500/50 shadow-[0_0_20px_rgba(245,158,11,0.5)] border-amber-400 scale-105' 
-                      : isTheirTurn && !opp.isEliminated
-                        ? 'ring-4 ring-yellow-400 animate-pulse border-yellow-300'
-                        : ''
+                    isTargetedByActionWindow && !opp.isEliminated
+                      ? 'ring-4 ring-red-500 animate-pulse border-red-400 scale-105 shadow-[0_0_25px_rgba(239,68,68,0.7)]'
+                      : isTargeted 
+                        ? 'ring-4 ring-amber-500/50 shadow-[0_0_20px_rgba(245,158,11,0.5)] border-amber-400 scale-105' 
+                        : isTheirTurn && !opp.isEliminated
+                          ? 'ring-4 ring-yellow-400 animate-pulse border-yellow-300'
+                          : ''
                   }`}>
                     {opp.isEliminated ? (
                       <svg className="w-12 h-12 fill-current" viewBox="0 0 24 24">
                         <path d="M12 2C8.13 2 5 5.13 5 9c0 2.38 1.19 4.47 3 5.74V17c0 .55.45 1 1 1h6c.55 0 1-.45 1-1v-2.26c1.81-1.27 3-3.36 3-5.74 0-3.87-3.13-7-7-7zm-3 7c-.55 0-1-.45-1-1 0-1.66 1.34-3 3-3 .55 0 1 .45 1 1s-.45 1-1 1c-.55 0-1 .45-1 1 0 .55-.45 1-1 1zm6 0c-.55 0-1-.45-1-1 0-.55-.45-1-1-1s-1 .45-1 1c0 1.66 1.34 3 3 3 .55 0 1-.45 1-1s-.45-1-1-1z" />
                       </svg>
                     ) : (
-                      <svg className="w-13 h-13 fill-current" viewBox="0 0 40 40">
-                        <path d="M8,12 L3,2 L14,9 Z" />
-                        <path d="M32,12 L37,2 L26,9 Z" />
-                        <circle cx="20" cy="20" r="11" />
-                        <circle cx="15" cy="18" r="4.2" fill="#fff" stroke="#000" strokeWidth="0.5" />
-                        <circle cx="25" cy="18" r="4.2" fill="#fff" stroke="#000" strokeWidth="0.5" />
-                        <circle cx="14" cy="17.5" r="1.2" fill="#000" />
-                        <circle cx="26" cy="18.5" r="1.2" fill="#000" />
-                        <polygon points="20,22 18,20 22,20" fill="#f87171" />
-                        <path d="M18,24 Q20,25.5 22,24" stroke="#f87171" strokeWidth="1" fill="none" />
+                      <svg className="w-14 h-14" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        {/* Ears */}
+                        <path d="M20 50 L20 15 L45 35 Z" fill="currentColor" opacity="0.9" />
+                        <path d="M80 50 L80 15 L55 35 Z" fill="currentColor" opacity="0.9" />
+                        {/* Inner Ears */}
+                        <path d="M25 42 L25 25 L40 35 Z" fill="rgba(255,255,255,0.3)" />
+                        <path d="M75 42 L75 25 L60 35 Z" fill="rgba(255,255,255,0.3)" />
+                        {/* Head */}
+                        <circle cx="50" cy="55" r="35" fill="currentColor" />
+                        {/* Eyes */}
+                        {themeIndex === 0 ? (
+                          <>
+                            {/* OTHO (Angry/Determined) */}
+                            <path d="M30 45 L45 55" stroke="white" strokeWidth="4" strokeLinecap="round" />
+                            <path d="M70 45 L55 55" stroke="white" strokeWidth="4" strokeLinecap="round" />
+                            <circle cx="38" cy="55" r="4" fill="white" />
+                            <circle cx="62" cy="55" r="4" fill="white" />
+                          </>
+                        ) : themeIndex === 1 ? (
+                          <>
+                            {/* ADAM (Crazy/Wide-eyed) */}
+                            <circle cx="35" cy="50" r="8" fill="white" />
+                            <circle cx="65" cy="50" r="12" fill="white" />
+                            <circle cx="35" cy="50" r="3" fill="black" />
+                            <circle cx="65" cy="50" r="4" fill="black" />
+                          </>
+                        ) : (
+                          <>
+                            {/* BARBARA (Cute/Innocent) */}
+                            <circle cx="35" cy="52" r="7" fill="white" />
+                            <circle cx="65" cy="52" r="7" fill="white" />
+                            <circle cx="37" cy="50" r="3" fill="black" />
+                            <circle cx="63" cy="50" r="3" fill="black" />
+                            {/* Blush */}
+                            <circle cx="25" cy="60" r="5" fill="rgba(255,100,150,0.5)" />
+                            <circle cx="75" cy="60" r="5" fill="rgba(255,100,150,0.5)" />
+                          </>
+                        )}
+                        {/* Nose and Mouth */}
+                        <polygon points="47,65 53,65 50,68" fill="rgba(0,0,0,0.5)" />
+                        <path d="M50 68 Q45 75 40 70 M50 68 Q55 75 60 70" stroke="rgba(0,0,0,0.5)" strokeWidth="2" strokeLinecap="round" fill="none" />
                       </svg>
                     )}
                   </div>
@@ -653,9 +717,9 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
                       }}
                       transition={{ 
                         type: 'spring', 
-                        stiffness: 200, 
-                        damping: 18, 
-                        duration: 0.6,
+                        stiffness: 90, 
+                        damping: 15, 
+                        duration: 1.0,
                       }}
                       style={{ zIndex: i }}
                     >
@@ -760,11 +824,12 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
               >
                 <button 
                   onClick={() => handlePlayCombo()}
-                  className="bg-gradient-to-r from-orange-500 to-red-600 hover:from-orange-400 hover:to-red-500 text-white font-cartoon px-8 py-2.5 rounded-full text-lg shadow-[0_8px_25px_rgba(249,115,22,0.6)] border border-orange-400/30 uppercase tracking-widest transition-all hover:scale-105 active:scale-95"
+                  className="group relative inline-flex items-center justify-center px-10 py-3.5 font-cartoon text-xl tracking-widest text-white uppercase bg-gradient-to-r from-orange-500 to-red-600 border-2 border-orange-400/50 rounded-full overflow-hidden transition-all hover:scale-110 active:scale-95 shadow-[0_10px_30px_rgba(249,115,22,0.6)]"
                 >
-                  Play ({selectedCardIds.length})
+                  <span className="absolute w-0 h-0 transition-all duration-500 ease-out bg-white rounded-full group-hover:w-56 group-hover:h-56 opacity-10"></span>
+                  <span className="relative drop-shadow-md">Play ({selectedCardIds.length})</span>
                 </button>
-                <span className="text-[8px] text-orange-400/80 mt-1 font-cartoon uppercase tracking-widest animate-pulse">
+                <span className="text-[9px] text-orange-400 mt-2 font-cartoon uppercase tracking-widest animate-pulse bg-black/40 px-3 py-1 rounded-full border border-orange-500/20 backdrop-blur-sm">
                   Double tap card to play
                 </span>
               </motion.div>
@@ -804,21 +869,37 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
                 <path d="M50,50 L45,0 L50,15 L55,0 Z M50,50 L95,45 L85,50 L95,55 Z M50,50 L45,100 L50,85 L55,100 Z M50,50 L0,45 L15,50 L0,55 Z" />
                 <path d="M50,50 L18,18 L32,32 Z M50,50 L82,18 L68,32 Z M50,50 L82,82 L68,68 Z M50,50 L18,82 L32,68 Z" transform="rotate(22.5, 50, 50)" />
               </svg>
+
+              {/* Glowing red targeted aura for local player */}
+              {isLocalPlayerTargeted && (
+                <div className="absolute -inset-2 bg-red-600 rounded-full blur opacity-75 animate-ping z-0"></div>
+              )}
               
               <div className={`w-14 h-14 rounded-full border-4 bg-blue-900/60 border-blue-400 flex items-center justify-center shadow-2xl relative overflow-hidden z-10 ${
-                isMyTurn ? 'ring-2 ring-yellow-300 animate-pulse' : ''
+                isLocalPlayerTargeted
+                  ? 'ring-4 ring-red-500 animate-pulse border-red-400 scale-105 shadow-[0_0_25px_rgba(239,68,68,0.7)]'
+                  : isMyTurn 
+                    ? 'ring-2 ring-yellow-300 animate-pulse' 
+                    : ''
               }`}>
-                {/* Silly Blue Cat SVG */}
-                <svg className="w-10 h-10 text-white fill-current" viewBox="0 0 40 40">
-                  <path d="M8,12 L3,2 L14,9 Z" />
-                  <path d="M32,12 L37,2 L26,9 Z" />
-                  <circle cx="20" cy="20" r="11" />
-                  <circle cx="15" cy="18" r="4" fill="#fff" stroke="#000" strokeWidth="0.5" />
-                  <circle cx="25" cy="18" r="4" fill="#fff" stroke="#000" strokeWidth="0.5" />
-                  <circle cx="16" cy="18" r="1.2" fill="#000" />
-                  <circle cx="24" cy="18" r="1.2" fill="#000" />
-                  <polygon points="20,22 18,20 22,20" fill="#f87171" />
-                  <path d="M18,24 Q20,25.5 22,24" stroke="#f87171" strokeWidth="1" fill="none" />
+                {/* Local Player Blue Cat SVG */}
+                <svg className="w-12 h-12 text-white" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  {/* Ears */}
+                  <path d="M20 50 L20 15 L45 35 Z" fill="currentColor" opacity="0.9" />
+                  <path d="M80 50 L80 15 L55 35 Z" fill="currentColor" opacity="0.9" />
+                  {/* Inner Ears */}
+                  <path d="M25 42 L25 25 L40 35 Z" fill="rgba(255,255,255,0.3)" />
+                  <path d="M75 42 L75 25 L60 35 Z" fill="rgba(255,255,255,0.3)" />
+                  {/* Head */}
+                  <circle cx="50" cy="55" r="35" fill="currentColor" />
+                  {/* Eyes (Cool/Confident) */}
+                  <path d="M30 50 Q38 45 45 50" stroke="white" strokeWidth="4" strokeLinecap="round" fill="none" />
+                  <path d="M70 50 Q62 45 55 50" stroke="white" strokeWidth="4" strokeLinecap="round" fill="none" />
+                  <circle cx="38" cy="52" r="3" fill="white" />
+                  <circle cx="62" cy="52" r="3" fill="white" />
+                  {/* Nose and Mouth */}
+                  <polygon points="48,62 52,62 50,65" fill="rgba(0,0,0,0.5)" />
+                  <path d="M50 65 Q45 70 40 68 M50 65 Q55 70 60 68" stroke="rgba(0,0,0,0.5)" strokeWidth="2" strokeLinecap="round" fill="none" />
                 </svg>
               </div>
             </div>
@@ -827,7 +908,12 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
               <span className="font-cartoon text-xs text-blue-200 bg-blue-950/70 border border-blue-400/40 px-2 py-0.5 rounded-md shadow uppercase tracking-wider">
                 YOU
               </span>
-              {isMyTurn && (
+              {isLocalPlayerTargeted && (
+                <span className="text-[8px] font-cartoon text-red-400 font-bold uppercase tracking-widest mt-0.5 animate-pulse">
+                  🎯 TARGETED!
+                </span>
+              )}
+              {isMyTurn && !isLocalPlayerTargeted && (
                 <span className="text-[8px] font-cartoon text-yellow-300 uppercase tracking-widest mt-0.5 animate-pulse">
                   Your Turn!
                 </span>
@@ -959,7 +1045,6 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
       )}
 
       {/* Action Window Overlay */}
-      {renderActionWindow()}
 
       {/* Favor Request Overlay */}
       {renderFavorOverlay()}
@@ -972,17 +1057,101 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
             initial={{ opacity: 0 }} 
             animate={{ opacity: 1 }} 
             exit={{ opacity: 0 }}
-            className="absolute inset-0 bg-red-950/95 backdrop-blur-3xl flex flex-col items-center justify-center z-50 p-6 pointer-events-auto"
+            className="absolute inset-0 bg-black/95 backdrop-blur-3xl flex flex-col items-center justify-center z-50 p-6 pointer-events-auto"
           >
-              <h2 className="text-7xl md:text-9xl font-cartoon text-white mb-2 animate-bounce">KABOOM!</h2>
-              <p className="text-lg text-red-200 font-cartoon mb-8 uppercase tracking-widest">Self-Destruction In {gameState.bombCountdown ?? 15}s</p>
+              <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,_rgba(220,38,38,0.15)_0%,_rgba(0,0,0,0.8)_80%)] pointer-events-none"></div>
+              
+              <h2 className="text-7xl md:text-9xl font-cartoon text-transparent bg-clip-text bg-gradient-to-b from-red-400 to-red-600 mb-2 animate-bounce drop-shadow-[0_0_20px_rgba(220,38,38,0.8)]">KABOOM!</h2>
+              <p className="text-xl text-red-400 font-mono mb-8 uppercase tracking-[0.2em] animate-pulse">
+                [ SELF-DESTRUCT IN {gameState.bombCountdown ?? 15}s ]
+              </p>
+              
               {hasDefuse ? (
-                <div className="flex flex-wrap justify-center gap-4">
-                  <button onClick={() => onAction({ type: 'DEFUSE', insertIndex: 0 })} className="px-8 py-4 rounded-full bg-emerald-500 font-cartoon uppercase tracking-wider text-black transition-all hover:scale-105 active:scale-95 shadow-lg">Top</button>
-                  <button onClick={() => onAction({ type: 'DEFUSE', insertIndex: 1 })} className="px-8 py-4 rounded-full bg-white/10 border border-white/20 font-cartoon uppercase tracking-wider transition-all hover:scale-105 active:scale-95 text-white">2nd</button>
-                  <button onClick={() => onAction({ type: 'DEFUSE', insertIndex: Math.floor(Math.random() * 20) })} className="px-8 py-4 rounded-full bg-white/10 border border-white/20 font-cartoon uppercase tracking-wider transition-all hover:scale-105 active:scale-95 text-white">Random</button>
+                <div className="flex flex-col items-center gap-6 bg-slate-900 border-2 border-red-900/50 p-8 rounded-[2rem] shadow-[0_0_50px_rgba(220,38,38,0.2),inset_0_0_20px_rgba(0,0,0,0.8)] max-w-md w-full relative overflow-hidden">
+                  {/* High-tech diagonal scanlines */}
+                  <div className="absolute inset-0 opacity-10 bg-[repeating-linear-gradient(45deg,transparent,transparent_10px,rgba(0,0,0,1)_10px,rgba(0,0,0,1)_20px)] pointer-events-none"></div>
+
+                  <p className="text-emerald-400 font-mono text-sm uppercase tracking-widest text-center">
+                    &gt; DEFUSE SEQUENCE INITIATED &lt;<br/>
+                    <span className="text-slate-400 text-xs">Awaiting insertion vector...</span>
+                  </p>
+                  
+                  {/* Preset quick buttons */}
+                  <div className="flex gap-3 justify-center w-full z-10">
+                    <button 
+                      onClick={() => { setDefuseInsertIndex(0); onAction({ type: 'DEFUSE', insertIndex: 0 }); }}
+                      className="flex-1 py-3 rounded-xl bg-slate-800 border border-emerald-500/30 text-emerald-400 font-mono uppercase tracking-wider text-xs transition-all hover:bg-emerald-500/20 hover:border-emerald-400 hover:shadow-[0_0_15px_rgba(16,185,129,0.4)] active:scale-95"
+                    >
+                      TOP [0]
+                    </button>
+                    <button 
+                      onClick={() => { setDefuseInsertIndex(1); onAction({ type: 'DEFUSE', insertIndex: 1 }); }}
+                      className="flex-1 py-3 rounded-xl bg-slate-800 border border-slate-700 text-slate-300 font-mono uppercase tracking-wider transition-all hover:bg-slate-700 hover:border-slate-500 active:scale-95 text-xs"
+                    >
+                      2ND [1]
+                    </button>
+                    <button 
+                      onClick={() => {
+                        const idx = Math.floor(Math.random() * (gameState.drawPileCount + 1));
+                        setDefuseInsertIndex(idx);
+                        onAction({ type: 'DEFUSE', insertIndex: idx });
+                      }}
+                      className="flex-1 py-3 rounded-xl bg-slate-800 border border-slate-700 text-slate-300 font-mono uppercase tracking-wider transition-all hover:bg-slate-700 hover:border-slate-500 active:scale-95 text-xs"
+                    >
+                      RANDOM
+                    </button>
+                  </div>
+
+                  <div className="w-full border-t border-slate-800 my-2 z-10" />
+
+                  {/* Custom Position Selection */}
+                  <div className="flex flex-col gap-4 w-full items-center z-10">
+                    <div className="flex items-center justify-between w-full px-2">
+                      <span className="text-slate-400 font-mono text-xs uppercase">Custom Vector:</span>
+                      <span className="text-emerald-400 font-mono text-xl bg-black/50 px-3 py-1 rounded border border-emerald-900/50 shadow-[inset_0_0_10px_rgba(16,185,129,0.2)]">
+                        {defuseInsertIndex.toString().padStart(2, '0')}
+                      </span>
+                    </div>
+                    
+                    <div className="flex items-center gap-4 w-full">
+                      <button 
+                        type="button"
+                        onClick={() => setDefuseInsertIndex(prev => Math.max(0, prev - 1))}
+                        disabled={defuseInsertIndex <= 0}
+                        className="w-10 h-10 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center font-mono text-slate-400 hover:text-white hover:border-slate-500 disabled:opacity-30 transition-all text-xl"
+                      >
+                        -
+                      </button>
+                      <input 
+                        type="range"
+                        min="0"
+                        max={gameState.drawPileCount}
+                        value={defuseInsertIndex}
+                        onChange={(e) => setDefuseInsertIndex(Math.min(gameState.drawPileCount, Math.max(0, parseInt(e.target.value) || 0)))}
+                        className="flex-1 accent-emerald-500 h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer"
+                      />
+                      <button 
+                        type="button"
+                        onClick={() => setDefuseInsertIndex(prev => Math.min(gameState.drawPileCount, prev + 1))}
+                        disabled={defuseInsertIndex >= gameState.drawPileCount}
+                        className="w-10 h-10 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center font-mono text-slate-400 hover:text-white hover:border-slate-500 disabled:opacity-30 transition-all text-xl"
+                      >
+                        +
+                      </button>
+                    </div>
+                    <span className="text-[9px] text-slate-600 font-mono uppercase text-center mt-[-8px]">
+                      [0 = TOP] ... [{gameState.drawPileCount} = BOTTOM]
+                    </span>
+
+                    <button 
+                      onClick={() => onAction({ type: 'DEFUSE', insertIndex: defuseInsertIndex })}
+                      className="w-full mt-2 py-4 rounded-xl bg-emerald-600 font-mono uppercase tracking-[0.2em] text-white text-sm transition-all hover:bg-emerald-500 hover:shadow-[0_0_25px_rgba(16,185,129,0.6)] active:scale-[0.98] font-bold shadow-[inset_0_1px_1px_rgba(255,255,255,0.4)]"
+                    >
+                      EXECUTE DEFUSAL
+                    </button>
+                  </div>
                 </div>
-              ) : <p className="text-3xl font-cartoon text-red-500 animate-pulse uppercase tracking-wider">No Defuse Card!</p>}
+              ) : <p className="text-4xl font-mono text-red-500 animate-pulse uppercase tracking-widest mt-8 font-bold">NO DEFUSE CARD DETECTED</p>}
           </motion.div>
         )}
       </AnimatePresence>
@@ -1042,29 +1211,32 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
             let isBtnDisabled = true;
 
             if (!nopeCard) {
-              btnStyle = "bg-slate-950/60 text-slate-600 border border-slate-900 cursor-not-allowed opacity-50";
-              statusText = "No Nope";
+              btnStyle = "bg-slate-900 border-b-4 border-slate-950 text-slate-700 cursor-not-allowed opacity-40 shadow-inner";
+              statusText = "NO NOPE";
             } else if (isNopeOpportunity) {
-              btnStyle = "bg-gradient-to-br from-red-500 to-red-700 hover:from-red-400 hover:to-red-600 text-white shadow-[0_0_40px_rgba(220,38,38,0.9)] border-2 border-red-400 animate-pulse cursor-pointer scale-110";
+              btnStyle = "bg-red-600 border-b-8 border-red-900 hover:bg-red-500 hover:border-red-800 active:border-b-0 active:translate-y-2 text-white shadow-[0_10px_40px_rgba(220,38,38,0.8)] cursor-pointer animate-pulse scale-110";
               statusText = "PLAY NOPE!";
               clickHandler = () => onAction({ type: 'PLAY_NOPE', cardId: nopeCard.id });
               isBtnDisabled = false;
             } else {
-              btnStyle = "bg-red-950/30 hover:bg-red-950/60 text-red-400 border border-red-900/50 cursor-pointer shadow-[0_0_35px_rgba(220,38,38,0.35)]";
-              statusText = "Nope Ready";
+              btnStyle = "bg-red-900/50 border-b-4 border-red-950/80 text-red-400 hover:bg-red-800/60 cursor-pointer shadow-[0_5px_15px_rgba(220,38,38,0.2)]";
+              statusText = "NOPE READY";
               clickHandler = () => alert("Wait for an action to Nope!");
               isBtnDisabled = false;
             }
 
             return (
               <motion.button
-                whileHover={!isBtnDisabled ? { scale: 1.08, rotate: 3 } : {}}
-                whileTap={!isBtnDisabled ? { scale: 0.95 } : {}}
+                whileHover={!isBtnDisabled && !isNopeOpportunity ? { y: -2 } : {}}
+                whileTap={!isBtnDisabled ? { y: 4, scale: 0.95 } : {}}
                 onClick={clickHandler}
-                className={`w-24 h-24 sm:w-28 sm:h-28 rounded-full flex flex-col items-center justify-center font-cartoon uppercase transition-all duration-300 shadow-2xl ${btnStyle}`}
+                className={`relative w-24 h-24 sm:w-28 sm:h-28 rounded-full flex flex-col items-center justify-center font-cartoon uppercase transition-all duration-200 ${btnStyle}`}
               >
-                <span className="text-base sm:text-lg tracking-tighter">NOPE!</span>
-                <span className="text-[8px] sm:text-[9px] font-bold opacity-75 mt-1">{statusText}</span>
+                {/* Glossy highlight for 3D effect */}
+                <div className="absolute top-1 left-2 right-2 h-1/3 bg-gradient-to-b from-white/30 to-transparent rounded-full pointer-events-none mix-blend-overlay"></div>
+                
+                <span className="text-xl sm:text-2xl tracking-tighter drop-shadow-md">NOPE!</span>
+                <span className="text-[9px] sm:text-[10px] font-bold opacity-90 mt-1 tracking-widest drop-shadow-sm">{statusText}</span>
               </motion.button>
             );
           })()}

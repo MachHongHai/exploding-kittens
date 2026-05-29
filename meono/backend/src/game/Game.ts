@@ -714,6 +714,11 @@ export class Game {
       description: 'Boom!'
     });
 
+    // Pad knownDeckTop if it's shorter than the insert position
+    while (player.knownDeckTop.length < pos) {
+      player.knownDeckTop.push({ cardType: 'UNKNOWN', cardName: 'Unknown Card' });
+    }
+
     // The defusing player remembers exactly where the bomb was inserted
     player.knownDeckTop.splice(pos, 0, { cardType: CardType.EXPLODING_KITTEN, cardName: 'Exploding Kitten' });
 
