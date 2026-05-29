@@ -17,18 +17,24 @@ export const CardView: React.FC<CardViewProps> = ({ card, onClick, disabled, cla
   // Card Back (The "Double-Bezel" premium look)
   if (!card) {
     return (
-      <motion.div 
+      <motion.button 
         layoutId={layoutId}
         initial={{ scale: 0.8, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
         exit={{ scale: 0.5, opacity: 0 }}
-        className={`aspect-[2/3] ${baseSize} p-1.5 rounded-[1.5rem] bg-white/5 border border-white/10 shadow-2xl backdrop-blur-md ${className}`}
+        whileHover={!disabled ? { y: -12, scale: 1.05 } : {}}
+        whileTap={!disabled ? { scale: 0.95 } : {}}
+        onClick={onClick}
+        disabled={disabled}
+        className={`aspect-[2/3] ${baseSize} p-1.5 rounded-[1.5rem] bg-white/5 border border-white/10 shadow-2xl backdrop-blur-md ${
+          disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
+        } ${className}`}
       >
-        <div className="w-full h-full rounded-[1.125rem] bg-gradient-to-br from-red-900 to-black shadow-[inset_0_1px_1px_rgba(255,255,255,0.2)] border border-red-500/20 flex flex-col items-center justify-center relative overflow-hidden">
+        <div className="w-full h-full rounded-[1.125rem] bg-gradient-to-br from-red-900 to-black shadow-[inset_0_1px_1px_rgba(255,255,255,0.2)] border border-red-500/20 flex flex-col items-center justify-center relative overflow-hidden pointer-events-none">
           <div className="absolute inset-0 opacity-20 bg-[radial-gradient(circle_at_top_right,_var(--tw-gradient-stops))] from-red-500 via-transparent to-transparent"></div>
           <span className="text-red-500/80 font-black text-2xl sm:text-4xl select-none tracking-tighter drop-shadow-md">EK</span>
         </div>
-      </motion.div>
+      </motion.button>
     );
   }
 

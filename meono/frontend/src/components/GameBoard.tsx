@@ -405,7 +405,9 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
 
                   {/* Card Hand Tray (Red overlapping cards, placed *in front* of the bottom of the circle) */}
                   {!opp.isEliminated && (
-                    <div className="absolute bottom-[-16px] left-1/2 -translate-x-1/2 flex justify-center pointer-events-none z-20"
+                    <div className={`absolute bottom-[-16px] left-1/2 -translate-x-1/2 flex justify-center z-20 ${
+                      isStealer && opp.id === victimId ? 'pointer-events-auto' : 'pointer-events-none'
+                    }`}
                          style={{ 
                            gap: opp.handCount > 5 ? `-${Math.min(24, 12 + (opp.handCount - 5) * 1.5)}px` : '-12px' 
                          }}
@@ -414,14 +416,25 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
                         const mid = (opp.handCount - 1) / 2;
                         const rotation = (cardIdx - mid) * (opp.handCount > 8 ? 8 : 12);
                         const translateY = Math.abs(cardIdx - mid) * 1.5;
+                        const isStealTarget = isStealer && opp.id === victimId;
                         return (
-                          <div 
+                          <motion.button 
                             key={cardIdx} 
-                            className="w-7 h-10 bg-[#dc2626] border border-red-400 rounded-md shadow-lg flex items-center justify-center shrink-0 origin-bottom"
+                            type="button"
+                            onClick={() => isStealTarget && handleStealPick(cardIdx)}
+                            whileHover={isStealTarget ? { y: -15, scale: 1.3, zIndex: 100 } : {}}
+                            whileTap={isStealTarget ? { scale: 0.9 } : {}}
+                            className={`w-7 h-10 rounded-md shadow-lg flex items-center justify-center shrink-0 origin-bottom transition-all ${
+                              isStealTarget 
+                                ? 'bg-gradient-to-b from-orange-500 to-red-600 border-2 border-amber-300 cursor-pointer shadow-[0_0_15px_rgba(249,115,22,0.8)] animate-pulse' 
+                                : 'bg-[#dc2626] border border-red-400'
+                            }`}
                             style={{ transform: `rotate(${rotation}deg) translateY(${translateY}px)` }}
                           >
-                            <span className="text-[6px] text-white font-cartoon scale-[0.7] leading-none">EK</span>
-                          </div>
+                            <span className="text-[6px] text-white font-cartoon scale-[0.7] leading-none">
+                              {isStealTarget ? '?' : 'EK'}
+                            </span>
+                          </motion.button>
                         );
                       })}
                     </div>
@@ -877,6 +890,15 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
         </div>
       )}
 
+      {/* Stealing Instruction Banner */}
+      {isStealer && victim && (
+        <div className="absolute top-24 left-1/2 -translate-x-1/2 z-30 bg-orange-600/90 border border-orange-500/50 backdrop-blur-xl px-6 py-3 rounded-2xl flex items-center gap-3 shadow-[0_0_30px_rgba(249,115,22,0.4)] animate-pulse">
+           <span className="text-sm font-cartoon text-white uppercase tracking-wider">
+             👉 Tap a card in {victim.name}'s hand at the top to steal! 👈
+           </span>
+        </div>
+      )}
+
       {/* Action Window Overlay */}
       {renderActionWindow()}
 
@@ -927,41 +949,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
         )}
       </AnimatePresence>
 
-      {/* Interactive Steal Overlay (When I AM stealing) */}
-      <AnimatePresence>
-        {isStealer && victim && (
-          <motion.div 
-            key="steal-overlay"
-            initial={{ opacity: 0, scale: 0.9 }} 
-            animate={{ opacity: 1, scale: 1 }} 
-            exit={{ opacity: 0, scale: 0.9 }} 
-            className="absolute top-[35%] left-1/2 -translate-x-1/2 -translate-y-1/2 w-[95%] max-w-lg bg-slate-950/95 border border-orange-500/30 rounded-[2.5rem] p-6 shadow-[0_0_50px_rgba(249,115,22,0.3)] z-45 text-center flex flex-col items-center justify-center pointer-events-auto"
-          >
-              <h2 className="text-2xl font-cartoon text-white mb-1 uppercase tracking-tighter italic">
-                Stealing from {victim.name}
-              </h2>
-              <p className="text-xs text-slate-400 mb-6 font-cartoon uppercase tracking-widest">Pick a card from their hand</p>
-              
-              <div className="flex flex-wrap justify-center -space-x-12 sm:-space-x-16 hover:space-x-2 transition-all duration-300">
-                 {Array.from({ length: victim.handCount }).map((_, i) => (
-                   <motion.div 
-                      key={i} 
-                      initial={{ y: 20, opacity: 0 }}
-                      animate={{ y: 0, opacity: 1 }}
-                      transition={{ delay: i * 0.05 }}
-                      whileHover={{ y: -15, scale: 1.05, zIndex: 10 }}
-                      className="relative cursor-pointer"
-                      onClick={() => handleStealPick(i)}
-                    >
-                      <div className="transform scale-[0.7] origin-center">
-                        <CardView className="border-orange-500/30 hover:border-orange-500 shadow-xl" />
-                      </div>
-                   </motion.div>
-                 ))}
-              </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+
 
       {/* 3-of-a-Kind Guess Modal */}
       {showGuessModal && (
