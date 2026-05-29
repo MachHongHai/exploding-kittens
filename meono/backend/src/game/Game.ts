@@ -18,9 +18,12 @@ export class Game {
   set lastAction(value: string | null) {
     this._lastAction = value;
     if (value) {
-      this.actionHistory.push(value);
-      if (this.actionHistory.length > 20) {
-        this.actionHistory.shift();
+      // Prevent duplicate consecutive entries
+      if (this.actionHistory.length === 0 || this.actionHistory[this.actionHistory.length - 1] !== value) {
+        this.actionHistory.push(value);
+        if (this.actionHistory.length > 30) {
+          this.actionHistory.shift();
+        }
       }
     }
   }
@@ -203,7 +206,6 @@ export class Game {
         nopeCount: 0,
         expiresAt: Date.now() + 5000
       };
-      this.lastAction = `${player.name} played ${card.name}.`;
       return { success: true };
     }
 
@@ -224,7 +226,6 @@ export class Game {
         nopeCount: 0,
         expiresAt: Date.now() + 5000
       };
-      this.lastAction = `${player.name} played a Pair on ${target.name}.`;
       return { success: true };
     }
 
@@ -248,7 +249,6 @@ export class Game {
         nopeCount: 0,
         expiresAt: Date.now() + 5000
       };
-      this.lastAction = `${player.name} played Three of a kind on ${target.name}.`;
       return { success: true };
     }
 

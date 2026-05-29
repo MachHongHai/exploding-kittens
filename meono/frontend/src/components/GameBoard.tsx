@@ -641,13 +641,35 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
                   const isTop = i === gameState.discardPile.length - 1;
                   const rotation = (i * 11) % 23 - 11;
                   return (
-                    <div 
-                      key={card.id + i} 
-                      className="absolute inset-0 transition-all duration-700"
-                      style={{ transform: `rotate(${rotation}deg)`, zIndex: i }}
+                    <motion.div 
+                      key={card.id + '-' + i} 
+                      className="absolute inset-0"
+                      initial={isTop ? { y: -80, scale: 0.6, opacity: 0, rotate: 0 } : false}
+                      animate={{ 
+                        y: 0, 
+                        scale: 1, 
+                        opacity: 1, 
+                        rotate: rotation,
+                      }}
+                      transition={{ 
+                        type: 'spring', 
+                        stiffness: 200, 
+                        damping: 18, 
+                        duration: 0.6,
+                      }}
+                      style={{ zIndex: i }}
                     >
+                      {/* Brief glow effect on newest card */}
+                      {isTop && (
+                        <motion.div 
+                          className="absolute -inset-2 rounded-[1.4rem] bg-yellow-300/30 blur-md pointer-events-none"
+                          initial={{ opacity: 0.8 }}
+                          animate={{ opacity: 0 }}
+                          transition={{ duration: 1.5, ease: 'easeOut' }}
+                        />
+                      )}
                       <CardView card={card} disabled={!isTop} layoutId={card.id} className="w-20 sm:w-24 h-30 sm:h-36" />
-                    </div>
+                    </motion.div>
                   )
                 })
               )}
@@ -659,47 +681,63 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
         </div>
 
         {/* Right Side: Hanging Scroll Board */}
-        <div className="flex flex-col items-center w-52 shrink-0 pointer-events-auto relative z-10">
+        <div className="flex flex-col items-center w-56 shrink-0 pointer-events-auto relative z-10">
           {/* Hanging rod */}
-          <div className="w-44 h-2 bg-stone-500 rounded-full shadow-md relative flex items-center justify-between px-4">
+          <div className="w-48 h-2 bg-stone-500 rounded-full shadow-md relative flex items-center justify-between px-4">
             <div className="w-3.5 h-3.5 rounded-full bg-stone-700 -ml-4 border border-stone-600 shadow" />
             <div className="w-3.5 h-3.5 rounded-full bg-stone-700 -mr-4 border border-stone-600 shadow" />
           </div>
           
           {/* Parchment scroll container */}
-          <div className="w-40 -mt-1 bg-[#faf5ec] border border-[#d4c3a3] rounded-b-2xl p-3 shadow-[0_10px_20px_rgba(0,0,0,0.5)] flex flex-col justify-between h-44 overflow-hidden relative">
+          <div className="w-52 -mt-1 bg-[#faf5ec] border border-[#d4c3a3] rounded-b-2xl p-2.5 shadow-[0_10px_20px_rgba(0,0,0,0.5)] flex flex-col h-64 overflow-hidden relative">
             {/* Hanging tabs connecting scroll to rod */}
-            <div className="absolute -top-1.5 left-6 w-3 h-2 bg-stone-600 rounded" />
-            <div className="absolute -top-1.5 right-6 w-3 h-2 bg-stone-600 rounded" />
+            <div className="absolute -top-1.5 left-7 w-3 h-2 bg-stone-600 rounded" />
+            <div className="absolute -top-1.5 right-7 w-3 h-2 bg-stone-600 rounded" />
             
-            <div className="text-[10px] font-cartoon text-[#8c6747] uppercase tracking-wider text-center border-b border-[#ebdcb9] pb-1">
-              Scroll of Acts
-            </div>
-            
-            {/* Silly Turn Details graphic (mini YOU avatar pointing to cards) */}
-            <div className="flex items-center justify-center gap-1.5 py-1 mt-1 border-b border-[#ebdcb9] border-dashed">
-              <div className="w-7 h-7 rounded-full bg-blue-600 border border-blue-400 flex items-center justify-center text-[7px] font-cartoon text-white shadow-sm shrink-0">
-                YOU
-              </div>
-              <span className="text-stone-500 text-xs font-bold leading-none">➔</span>
-              <div className="w-5 h-7 bg-[#dc2626] border border-red-400 rounded-sm flex items-center justify-center shadow-sm shrink-0">
-                <span className="text-[5px] text-white font-cartoon leading-none">EK</span>
-              </div>
+            <div className="text-[10px] font-cartoon text-[#8c6747] uppercase tracking-wider text-center border-b border-[#ebdcb9] pb-1 mb-1.5 flex items-center justify-center gap-1">
+              📜 Scroll of Acts
+              <span className="text-[8px] text-stone-400 normal-case tracking-normal">({actionHistory.length})</span>
             </div>
 
-            <div className="flex-1 flex flex-col gap-0.5 overflow-y-auto mt-1.5 custom-scrollbar">
-              {actionHistory.slice(-3).reverse().map((act, index) => (
-                <div 
-                  key={index} 
-                  className={`font-parchment text-[9px] leading-tight ${
-                    index === 0 ? 'text-stone-900 font-extrabold' : 'text-stone-700/60'
-                  }`}
-                >
-                  • {act}
-                </div>
-              ))}
+            <div 
+              className="flex-1 flex flex-col gap-[3px] overflow-y-auto custom-scrollbar pr-1"
+              ref={(el) => { if (el) el.scrollTop = el.scrollHeight; }}
+            >
+              {actionHistory.slice(-10).map((act, index, arr) => {
+                const isNewest = index === arr.length - 1;
+                // Determine emoji based on action content
+                let emoji = '•';
+                if (act.includes('Attack')) emoji = '⚔️';
+                else if (act.includes('Skip')) emoji = '⏭️';
+                else if (act.includes('Shuffle')) emoji = '🔀';
+                else if (act.includes('See The Future')) emoji = '🔮';
+                else if (act.includes('Favor')) emoji = '🤝';
+                else if (act.includes('NOPE')) emoji = '🚫';
+                else if (act.includes('Nope')) emoji = '🚫';
+                else if (act.includes('drew')) emoji = '🃏';
+                else if (act.includes('explod')) emoji = '💥';
+                else if (act.includes('defuse')) emoji = '🛡️';
+                else if (act.includes('Defuse')) emoji = '🛡️';
+                else if (act.includes('stole') || act.includes('Pair') || act.includes('Three')) emoji = '🐱';
+                else if (act.includes('gave') || act.includes('picked')) emoji = '🔄';
+
+                return (
+                  <div 
+                    key={`${actionHistory.length}-${index}`}
+                    className={`font-parchment text-[10px] leading-snug px-1.5 py-[2px] rounded transition-all ${
+                      isNewest 
+                        ? 'text-stone-900 font-bold bg-amber-200/50 border-l-2 border-amber-600' 
+                        : index >= arr.length - 3
+                          ? 'text-stone-800'
+                          : 'text-stone-500'
+                    }`}
+                  >
+                    <span className="mr-0.5 text-[9px]">{emoji}</span> {act}
+                  </div>
+                );
+              })}
               {actionHistory.length === 0 && (
-                <span className="font-parchment text-[9px] text-stone-700/40 italic">Waiting...</span>
+                <span className="font-parchment text-[10px] text-stone-700/40 italic text-center mt-4">Waiting for the first move...</span>
               )}
             </div>
           </div>
