@@ -303,7 +303,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
     const spread = Math.min(22 / N, 5.5);
     const rotate = (index - mid) * spread;
     const y = Math.abs(index - mid) * Math.abs(index - mid) * 2 + 15; // Shifts baseline downward to crop cards
-    const x = (index - mid) * -18; // Pulls cards closer for overlap
+    const x = (index - mid) * -26; // Pulls cards closer for overlap (increased from -18 for larger cards)
     return { rotate, y, x };
   };
 
@@ -930,7 +930,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
             ) : (
               <motion.div 
                 layout
-                className="flex flex-row transition-all duration-700 ease-[cubic-bezier(0.32,0.72,0,1)] min-w-max h-44 items-end justify-center px-12 pt-4 overflow-visible"
+                className="flex flex-row transition-all duration-700 ease-[cubic-bezier(0.32,0.72,0,1)] min-w-max h-56 sm:h-64 items-end justify-center px-12 pt-4 overflow-visible"
               >
                 <AnimatePresence mode="popLayout">
                   {myPlayer?.hand?.map((card, index) => {
@@ -958,7 +958,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
                           layoutId={card.id}
                           onClick={() => toggleCardSelection(card.id)}
                           disabled={(!isMyTurn && !isFavorVictim) || isExploding}
-                          className={`w-20 sm:w-24 h-30 sm:h-36 ${
+                          className={`w-28 sm:w-36 h-42 sm:h-54 ${
                             isSelected 
                               ? 'ring-4 ring-orange-500 shadow-[0_0_40px_rgba(249,115,22,0.6)]' 
                               : isFavorVictim 

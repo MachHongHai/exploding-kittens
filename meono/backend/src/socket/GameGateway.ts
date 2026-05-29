@@ -57,6 +57,13 @@ export class GameGateway {
       socket.on('disconnect', () => {
         console.log(`[Socket] Client disconnected: ${socket.id}`);
         this.clearTimersForPlayer(socket.id);
+
+        const player = this.game.players.find(p => p.id === socket.id);
+        if (player && !player.isBot) {
+          console.log(`[Game] Human player ${player.name} (${socket.id}) disconnected. Stopping match.`);
+          this.game.status = 'GAME_OVER';
+          this.clearAllTimers();
+        }
       });
     });
   }
