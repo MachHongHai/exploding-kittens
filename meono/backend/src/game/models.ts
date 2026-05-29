@@ -47,13 +47,13 @@ export function generateCardId(): string {
 export function createDeck(playerCount: number): Card[] {
   const deck: Card[] = [];
   
-  const isSmallGame = playerCount <= 3;
-  
   const addCards = (type: CardType, count: number, name: string, description: string) => {
     for (let i = 0; i < count; i++) {
       deck.push({ id: generateCardId(), type, name, description });
     }
   };
+
+  const isSmallGame = playerCount <= 3;
 
   // Standard Exploding Kittens deck distribution (with paw print setup for 2-3 players)
   const counts = {

@@ -18,14 +18,97 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
   const [actionError, setActionError] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [isShuffling, setIsShuffling] = useState(false);
+  const [eliminatedPlayerId, setEliminatedPlayerId] = useState<string | null>(null);
+  const [showDefuseSuccess, setShowDefuseSuccess] = useState(false);
+  const [comboEffect, setComboEffect] = useState<{ type: string; count: number } | null>(null);
+
+  // Kitten Chance states
+  const totalCards = gameState.drawPileCount;
+  const kittens = gameState.explodingKittensCount ?? 0;
+  const kittenPercent = totalCards > 0 ? Math.round((kittens / totalCards) * 100) : 0;
+
+  const [prevKittenPercent, setPrevKittenPercent] = useState(kittenPercent);
+  const [shouldJoltDial, setShouldJoltDial] = useState(false);
+  const [joltType, setJoltType] = useState<'increase' | 'decrease' | null>(null);
+  const [needleJitter, setNeedleJitter] = useState(0);
+
+  // Wiggle needle when danger is high (>50%)
+  useEffect(() => {
+    if (kittenPercent > 50) {
+      const interval = setInterval(() => {
+        const magnitude = kittenPercent > 75 ? 2.2 : 1.2;
+        setNeedleJitter((Math.random() - 0.5) * magnitude);
+      }, 70);
+      return () => {
+        clearInterval(interval);
+        setNeedleJitter(0);
+      };
+    } else {
+      setNeedleJitter(0);
+    }
+  }, [kittenPercent]);
+
+  // Trigger container shake/jolt when percentage shifts
+  useEffect(() => {
+    if (kittenPercent !== prevKittenPercent) {
+      if (kittenPercent > prevKittenPercent) {
+        setJoltType('increase');
+        setShouldJoltDial(true);
+      } else {
+        setJoltType('decrease');
+        setShouldJoltDial(true);
+      }
+      setPrevKittenPercent(kittenPercent);
+      const timer = setTimeout(() => {
+        setShouldJoltDial(false);
+        setJoltType(null);
+      }, 500);
+      return () => clearTimeout(timer);
+    }
+  }, [kittenPercent, prevKittenPercent]);
   
   // Watch for shuffle action
   useEffect(() => {
     if (gameState.lastAction?.includes("played Shuffle")) {
       setIsShuffling(true);
-      const timer = setTimeout(() => setIsShuffling(false), 1000);
+      const timer = setTimeout(() => setIsShuffling(false), 2000);
       return () => clearTimeout(timer);
     }
+  }, [gameState.lastAction]);
+
+  // Watch for player elimination
+  useEffect(() => {
+    const eliminated = gameState.players.find(p => p.isEliminated && p.id !== eliminatedPlayerId);
+    if (eliminated && gameState.lastAction?.includes('eliminated') || gameState.lastAction?.includes('exploded')) {
+      setEliminatedPlayerId(eliminated?.id || null);
+      const timer = setTimeout(() => setEliminatedPlayerId(null), 4000);
+      return () => clearTimeout(timer);
+    }
+  }, [gameState.lastAction]);
+
+  // Watch for defuse success
+  useEffect(() => {
+    if (gameState.lastAction?.includes('defused') || gameState.lastAction?.includes('Defuse')) {
+      if (!gameState.waitingForDefuse) {
+        setShowDefuseSuccess(true);
+        const timer = setTimeout(() => setShowDefuseSuccess(false), 3000);
+        return () => clearTimeout(timer);
+      }
+    }
+  }, [gameState.lastAction, gameState.waitingForDefuse]);
+
+  // Watch for combo plays
+  useEffect(() => {
+    const action = gameState.lastAction || '';
+    if (action.includes('Pair') || action.includes('pair') || action.includes('2 of')) {
+      setComboEffect({ type: 'pair', count: 2 });
+    } else if (action.includes('Three') || action.includes('three') || action.includes('3 of')) {
+      setComboEffect({ type: 'triple', count: 3 });
+    } else {
+      return;
+    }
+    const timer = setTimeout(() => setComboEffect(null), 2500);
+    return () => clearTimeout(timer);
   }, [gameState.lastAction]);
 
   // Clear action error after 3 seconds
@@ -149,15 +232,35 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
         {showFavor && (
           <motion.div 
             key="favor-overlay"
-            initial={{ opacity: 0, scale: 0.9, y: 30 }} 
+            initial={{ opacity: 0, scale: 0.85, y: 40 }} 
             animate={{ opacity: 1, scale: 1, y: 0 }} 
-            exit={{ opacity: 0, scale: 0.9, y: 30 }}
-            className="absolute top-[35%] left-1/2 -translate-x-1/2 -translate-y-1/2 w-[90%] max-w-sm bg-purple-950/90 border border-purple-500/30 rounded-[2.5rem] p-6 shadow-[0_0_50px_rgba(168,85,247,0.3)] z-40 text-center flex flex-col items-center justify-center pointer-events-auto"
+            exit={{ opacity: 0, scale: 0.85, y: 40 }}
+            transition={{ type: 'spring', stiffness: 100, damping: 15 }}
+            className="absolute top-[35%] left-1/2 -translate-x-1/2 -translate-y-1/2 w-[90%] max-w-sm bg-purple-950/95 border border-purple-500/30 rounded-[2.5rem] p-6 shadow-[0_0_60px_rgba(168,85,247,0.4)] z-40 text-center flex flex-col items-center justify-center pointer-events-auto relative overflow-hidden"
           >
-            <h2 className="text-2xl font-cartoon text-purple-400 mb-1 uppercase tracking-tighter italic">
+            {/* Floating particles */}
+            <motion.div 
+              className="absolute w-40 h-40 rounded-full bg-purple-600/10 blur-[60px] -top-10 -left-10"
+              animate={{ scale: [1, 1.4, 1], rotate: [0, 90, 0] }}
+              transition={{ duration: 5, repeat: Infinity, ease: 'easeInOut' }}
+            />
+            <motion.div 
+              className="absolute w-32 h-32 rounded-full bg-fuchsia-500/10 blur-[50px] -bottom-8 -right-8"
+              animate={{ scale: [1.2, 1, 1.2], rotate: [0, -90, 0] }}
+              transition={{ duration: 4, repeat: Infinity, ease: 'easeInOut' }}
+            />
+            
+            <motion.span 
+              className="text-4xl mb-2"
+              animate={{ rotate: [0, 10, -10, 0], scale: [1, 1.1, 1] }}
+              transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
+            >
+              🤝
+            </motion.span>
+            <h2 className="text-2xl font-cartoon text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-fuchsia-400 mb-1 uppercase tracking-tighter italic relative z-10">
               FAVOR REQUESTED
             </h2>
-            <p className="text-xs text-slate-300 font-cartoon uppercase tracking-widest mb-6">
+            <p className="text-xs text-slate-300 font-cartoon uppercase tracking-widest mb-6 relative z-10">
               Give <span className="text-white bg-purple-500/30 px-2 py-0.5 rounded border border-purple-500/50">{favorRequester.name}</span> a card
             </p>
 
@@ -165,28 +268,36 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
               {selectedCard ? (
                 <motion.div 
                   key="give-btn"
-                  initial={{ y: 10, opacity: 0 }} 
-                  animate={{ y: 0, opacity: 1 }} 
-                  exit={{ y: -10, opacity: 0 }} 
-                  className="flex flex-col items-center gap-4 w-full"
+                  initial={{ y: 15, opacity: 0, scale: 0.9 }} 
+                  animate={{ y: 0, opacity: 1, scale: 1 }} 
+                  exit={{ y: -15, opacity: 0, scale: 0.9 }} 
+                  transition={{ type: 'spring', stiffness: 120, damping: 12 }}
+                  className="flex flex-col items-center gap-4 w-full relative z-10"
                 >
-                  <button 
+                  <motion.button 
                     onClick={handleGiveCard}
-                    className="w-full bg-purple-600 hover:bg-purple-500 text-white font-cartoon py-3 rounded-full text-sm shadow-[0_0_30px_rgba(168,85,247,0.4)] uppercase tracking-wider transition-all hover:scale-102 active:scale-98"
+                    whileHover={{ scale: 1.03, boxShadow: '0 0 40px rgba(168,85,247,0.6)' }}
+                    whileTap={{ scale: 0.97 }}
+                    className="w-full bg-gradient-to-r from-purple-600 to-fuchsia-600 hover:from-purple-500 hover:to-fuchsia-500 text-white font-cartoon py-3.5 rounded-full text-sm shadow-[0_0_30px_rgba(168,85,247,0.4)] uppercase tracking-wider transition-all border border-purple-400/30"
                   >
-                    Give "{selectedCard.name}"
-                  </button>
+                    ✨ Give "{selectedCard.name}" ✨
+                  </motion.button>
                   <span className="text-[9px] text-purple-400 font-cartoon uppercase tracking-widest animate-pulse">Tap another card to change</span>
                 </motion.div>
               ) : (
                 <motion.div 
                   key="select-msg"
-                  initial={{ y: 10, opacity: 0 }} 
+                  initial={{ y: 15, opacity: 0 }} 
                   animate={{ y: 0, opacity: 1 }} 
-                  exit={{ y: -10, opacity: 0 }}
-                  className="text-slate-500 text-xs font-cartoon uppercase tracking-widest border border-dashed border-white/10 rounded-2xl py-6 px-4 w-full"
+                  exit={{ y: -15, opacity: 0 }}
+                  className="text-slate-500 text-xs font-cartoon uppercase tracking-widest border border-dashed border-white/10 rounded-2xl py-6 px-4 w-full relative z-10"
                 >
-                  Select a card from your hand below...
+                  <motion.span
+                    animate={{ opacity: [0.5, 1, 0.5] }}
+                    transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
+                  >
+                    👇 Select a card from your hand below...
+                  </motion.span>
                 </motion.div>
               )}
             </AnimatePresence>
@@ -288,11 +399,8 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
     );
   }
 
-  // Calculate kitten percentage
-  const totalCards = gameState.drawPileCount;
-  const kittens = gameState.explodingKittensCount ?? 0;
-  const kittenPercent = totalCards > 0 ? Math.round((kittens / totalCards) * 100) : 0;
-  const needleRotation = -90 + (kittenPercent * 1.8);
+  const needleRotation = -90 + (kittenPercent * 1.8) + needleJitter;
+  const ledPulseDuration = kittenPercent > 75 ? '0.3s' : kittenPercent > 50 ? '0.6s' : kittenPercent > 25 ? '1.2s' : '2s';
 
   const actionHistory = gameState.actionHistory || [];
 
@@ -507,15 +615,26 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
                                 }}
                                 whileHover={isStealTarget ? { y: -20, scale: 1.2, zIndex: 100 } : {}}
                                 whileTap={isStealTarget ? { scale: 0.9 } : {}}
-                                className={`rounded-md shadow-lg flex items-center justify-center shrink-0 origin-bottom transition-all duration-300 ${
+                                className={`rounded-lg shadow-lg flex items-center justify-center shrink-0 origin-bottom transition-all duration-300 relative overflow-hidden ${
                                   isStealTarget 
-                                    ? 'bg-gradient-to-b from-orange-500 to-red-600 border-2 border-amber-300 cursor-pointer shadow-[0_0_20px_rgba(249,115,22,0.9)]' 
-                                    : 'bg-[#dc2626] border border-red-400'
+                                    ? 'border-2 border-amber-300 cursor-pointer shadow-[0_0_20px_rgba(249,115,22,0.9)]' 
+                                    : 'border border-red-800/60'
                                 }`}
                                 style={{ transform: `rotate(${rotation}deg) translateY(${translateY}px)` }}
                               >
-                                <span className={`text-white font-cartoon leading-none ${isStealTarget ? 'text-lg font-black' : 'text-[6px] scale-[0.7]'}`}>
-                                  {isStealTarget ? '?' : 'EK'}
+                                {/* Card back gradient base */}
+                                <div className={`absolute inset-0 ${
+                                  isStealTarget 
+                                    ? 'bg-gradient-to-b from-orange-500 via-red-600 to-red-800'
+                                    : 'bg-gradient-to-br from-red-700 via-red-800 to-[#4a0e0e]'
+                                }`} />
+                                {/* Subtle diamond pattern texture */}
+                                <div className="absolute inset-0 opacity-[0.08] bg-[repeating-conic-gradient(rgba(255,255,255,0.3)_0%_25%,transparent_0%_50%)] bg-[length:8px_8px]" />
+                                {/* Holographic top glare */}
+                                <div className="absolute top-0 left-0 right-0 h-1/3 bg-gradient-to-b from-white/20 to-transparent rounded-t-lg pointer-events-none mix-blend-overlay" />
+                                
+                                <span className={`relative z-10 text-white font-cartoon leading-none ${isStealTarget ? 'text-lg font-black' : 'text-[6px] scale-[0.7]'}`}>
+                                  {isStealTarget ? '?' : '🐾'}
                                 </span>
                               </motion.button>
                             );
@@ -544,116 +663,270 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
       <div className="relative z-10 flex-1 flex flex-row items-center justify-between px-8 py-2 max-w-6xl mx-auto w-full h-[45vh] max-h-[360px]">
         
         {/* Left Side: Kitten Chance Dial */}
-        <div className="flex flex-col items-center justify-center p-2.5 bg-black/45 border border-amber-950/20 backdrop-blur-sm rounded-3xl w-36 h-36 shadow-xl shrink-0 relative">
-          <div className="text-[9px] font-cartoon text-amber-200/50 uppercase tracking-widest text-center absolute top-2">
+        <motion.div 
+          animate={shouldJoltDial ? { 
+            scale: joltType === 'increase' ? [1, 1.15, 0.95, 1.05, 1] : [1, 1.06, 0.98, 1],
+            rotate: joltType === 'increase' ? [0, -3, 3, -1.5, 1.5, 0] : [0, 1.5, -1.5, 0],
+            borderColor: joltType === 'increase' ? ['rgba(120,113,108,0.8)', 'rgba(239,68,68,1)', 'rgba(120,113,108,0.8)'] : ['rgba(120,113,108,0.8)', 'rgba(16,185,129,1)', 'rgba(120,113,108,0.8)'],
+            boxShadow: joltType === 'increase'
+              ? [
+                  '0px 10px 25px rgba(0,0,0,0.5)',
+                  '0px 0px 30px rgba(239,68,68,0.8)',
+                  '0px 10px 25px rgba(0,0,0,0.5)'
+                ]
+              : [
+                  '0px 10px 25px rgba(0,0,0,0.5)',
+                  '0px 0px 25px rgba(16,185,129,0.6)',
+                  '0px 10px 25px rgba(0,0,0,0.5)'
+                ]
+          } : {}}
+          transition={{ duration: 0.5, ease: 'easeOut' }}
+          className="flex flex-col items-center justify-center p-2.5 bg-stone-950/90 border-2 border-stone-800/80 backdrop-blur-md rounded-3xl w-36 h-36 shadow-2xl shrink-0 relative overflow-visible z-10"
+        >
+          {/* Connecting Red Cable Cord (Responsive, layered behind, fades out to prevent overflow) */}
+          <svg className="absolute left-[85%] top-[40%] w-[150px] h-24 pointer-events-none -z-10 overflow-visible hidden md:block" fill="none" viewBox="0 0 150 96">
+            <defs>
+              <linearGradient id="wire-fade" x1="0" y1="0" x2="1" y2="0">
+                <stop offset="0%" stopColor="#b91c1c" stopOpacity="0.85" />
+                <stop offset="60%" stopColor="#b91c1c" stopOpacity="0.85" />
+                <stop offset="100%" stopColor="#b91c1c" stopOpacity="0" />
+              </linearGradient>
+            </defs>
+            <path 
+              d="M 0, 10 C 60, 80 100, 80 150, 30" 
+              stroke="url(#wire-fade)" 
+              strokeWidth="4" 
+              strokeLinecap="round"
+            />
+          </svg>
+
+          {/* Danger glow background when kitten % is high */}
+          <motion.div 
+            className="absolute inset-0 rounded-3xl pointer-events-none"
+            animate={{ 
+              backgroundColor: kittenPercent > 50 
+                ? `rgba(239,68,68,${Math.min(0.15, kittenPercent / 400)})` 
+                : 'rgba(0,0,0,0)',
+              boxShadow: kittenPercent > 60
+                ? `inset 0 0 30px rgba(239,68,68,${kittenPercent / 300})`
+                : 'inset 0 0 0px rgba(0,0,0,0)'
+            }}
+            transition={{ duration: 0.8 }}
+          />
+
+          {/* Curved Glossy Glass Glare Overlay */}
+          <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/5 to-white/10 pointer-events-none z-20 rounded-3xl" />
+          <div className="absolute top-0 left-0 right-0 h-1/2 bg-gradient-to-b from-white/10 to-transparent pointer-events-none z-20 rounded-t-3xl" />
+
+          {/* LED Warning Light */}
+          <div className="absolute top-2.5 right-3.5 flex items-center justify-center z-20">
+            <span className="relative flex h-2 w-2">
+              <span 
+                className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${
+                  kittenPercent > 50 
+                    ? 'bg-red-500' 
+                    : kittenPercent > 25 
+                      ? 'bg-amber-400' 
+                      : 'bg-green-400'
+                }`}
+                style={{ animationDuration: ledPulseDuration }}
+              />
+              <span className={`relative inline-flex rounded-full h-2 w-2 ${
+                kittenPercent > 50 
+                  ? 'bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.8)]' 
+                  : kittenPercent > 25 
+                    ? 'bg-amber-500 shadow-[0_0_6px_rgba(245,158,11,0.6)]' 
+                    : 'bg-green-500 shadow-[0_0_6px_rgba(16,185,129,0.6)]'
+              }`} />
+            </span>
+          </div>
+
+          <div className="text-[9px] font-cartoon text-amber-200/50 uppercase tracking-widest text-center absolute top-2 z-10">
             Chance of Kitten
           </div>
 
           <div className="relative w-24 h-20 mt-3 flex items-center justify-center overflow-hidden">
             <svg className="w-full h-full" viewBox="0 0 100 60">
-              {/* Background Arc */}
+              <defs>
+                <linearGradient id="gauge-gradient" x1="0%" y1="0%" x2="100%" y2="0%">
+                  <stop offset="0%" stopColor="#10b981" />
+                  <stop offset="35%" stopColor="#84cc16" />
+                  <stop offset="65%" stopColor="#eab308" />
+                  <stop offset="85%" stopColor="#f97316" />
+                  <stop offset="100%" stopColor="#ef4444" />
+                </linearGradient>
+                <radialGradient id="metallic-hub" cx="50%" cy="50%" r="50%">
+                  <stop offset="0%" stopColor="#78716c" />
+                  <stop offset="70%" stopColor="#44403c" />
+                  <stop offset="100%" stopColor="#1c1917" />
+                </radialGradient>
+              </defs>
+
+              {/* Recessed Track Background */}
               <path 
-                d="M 10 50 A 40 40 0 0 1 90 50" 
+                d="M 15 50 A 35 35 0 0 1 85 50" 
                 fill="none" 
                 stroke="#1c1917" 
-                strokeWidth="10" 
+                strokeWidth="8" 
                 strokeLinecap="round" 
               />
-              {/* Green Sector */}
+              {/* Gradient Colored Track */}
               <path 
-                d="M 10 50 A 40 40 0 0 1 40 18" 
+                d="M 15 50 A 35 35 0 0 1 85 50" 
                 fill="none" 
-                stroke="#10b981" 
-                strokeWidth="10" 
-              />
-              {/* Yellow Sector */}
-              <path 
-                d="M 40 18 A 40 40 0 0 1 60 18" 
-                fill="none" 
-                stroke="#fbbf24" 
-                strokeWidth="10" 
-              />
-              {/* Red Sector */}
-              <path 
-                d="M 60 18 A 40 40 0 0 1 90 50" 
-                fill="none" 
-                stroke="#ef4444" 
-                strokeWidth="10" 
+                stroke="url(#gauge-gradient)" 
+                strokeWidth="5" 
+                strokeLinecap="round" 
               />
 
-              {/* Needle pointer */}
+              {/* Ticks around the arc */}
+              {Array.from({ length: 11 }).map((_, i) => {
+                const pct = i * 10;
+                const angleDeg = -90 + pct * 1.8;
+                const angleRad = (angleDeg * Math.PI) / 180;
+                
+                // Outer ticks sit on the track
+                const rInner = 28;
+                const rOuter = 32;
+                const x1 = 50 + rInner * Math.sin(angleRad);
+                const y1 = 50 - rInner * Math.cos(angleRad);
+                const x2 = 50 + rOuter * Math.sin(angleRad);
+                const y2 = 50 - rOuter * Math.cos(angleRad);
+                
+                const isMajor = i % 5 === 0; // 0%, 50%, 100%
+                
+                return (
+                  <line
+                    key={i}
+                    x1={x1}
+                    y1={y1}
+                    x2={x2}
+                    y2={y2}
+                    stroke={isMajor ? 'rgba(255, 255, 255, 0.45)' : 'rgba(255, 255, 255, 0.2)'}
+                    strokeWidth={isMajor ? 1.2 : 0.6}
+                  />
+                );
+              })}
+
+              {/* Numeric Indicator Labels inside */}
+              <text x="24" y="47" fill="rgba(255,255,255,0.3)" fontSize="4" className="font-cartoon" textAnchor="middle">0%</text>
+              <text x="50" y="24" fill="rgba(255,255,255,0.3)" fontSize="4" className="font-cartoon" textAnchor="middle">50%</text>
+              <text x="76" y="47" fill="rgba(255,255,255,0.3)" fontSize="4" className="font-cartoon" textAnchor="middle">100%</text>
+
+              {/* Needle pointer with dropshadow & spring wiggle */}
               <g transform="translate(50, 50)">
+                {/* 3D Drop Shadow Polygon */}
                 <motion.polygon 
-                  points="-2.5,0 0,-38 2.5,0" 
-                  fill="#f97316"
-                  stroke="#ea580c"
-                  strokeWidth="0.8"
+                  points="-1.8,1.8 0,-36 1.8,1.8" 
+                  fill="rgba(0,0,0,0.4)"
+                  animate={{ rotate: needleRotation }}
+                  transition={{ 
+                    type: 'spring', 
+                    stiffness: joltType ? 280 : 120,
+                    damping: joltType ? 8 : 12,
+                    mass: 0.5 
+                  }}
+                  style={{ originX: 0, originY: 0, filter: 'blur(0.8px)', translateX: 1.2, translateY: 1.2 }}
+                />
+                {/* Main Pointer Needle */}
+                <motion.polygon 
+                  points="-1.5,0 0,-38 1.5,0" 
+                  fill={kittenPercent > 50 ? '#ef4444' : '#f97316'}
+                  stroke={kittenPercent > 50 ? '#b91c1c' : '#ea580c'}
+                  strokeWidth="0.4"
                   strokeLinejoin="round"
                   animate={{ rotate: needleRotation }}
-                  transition={{ type: 'spring', stiffness: 50, damping: 13 }}
+                  transition={{ 
+                    type: 'spring', 
+                    stiffness: joltType ? 280 : 120,
+                    damping: joltType ? 8 : 12,
+                    mass: 0.5 
+                  }}
                   style={{ originX: 0, originY: 0 }}
                 />
-                <circle cx="0" cy="0" r="5" fill="#ea580c" />
-                <circle cx="0" cy="0" r="2" fill="#fff" />
+                
+                {/* Glowing Center Hub (Metallic + Accent) */}
+                <circle cx="0" cy="0" r="5.5" fill="url(#metallic-hub)" stroke="#1c1917" strokeWidth="0.5" />
+                <motion.circle 
+                  cx="0" cy="0" r="3.2"
+                  animate={{ 
+                    fill: kittenPercent > 50 ? '#ef4444' : kittenPercent > 25 ? '#fbbf24' : '#10b981',
+                    boxShadow: kittenPercent > 50 ? '0 0 10px #ef4444' : 'none'
+                  }}
+                  transition={{ duration: 0.4 }}
+                />
+                <circle cx="0" cy="0" r="1" fill="#fff" />
               </g>
             </svg>
 
-            {/* Digital percentage readout */}
-            <div className="absolute bottom-0.5 font-cartoon text-lg text-white drop-shadow bg-black/60 border border-white/10 px-2.5 py-0.5 rounded-lg shadow">
+            {/* Digital percentage readout with danger-adaptive colors */}
+            <motion.div 
+              className={`absolute bottom-0.5 font-cartoon text-lg drop-shadow px-2.5 py-0.5 rounded-lg shadow border ${
+                kittenPercent > 60 
+                  ? 'text-red-400 bg-red-950/80 border-red-500/30' 
+                  : kittenPercent > 30 
+                    ? 'text-amber-300 bg-amber-950/60 border-amber-500/20' 
+                    : 'text-white bg-black/60 border-white/10'
+              }`}
+              animate={{ scale: kittenPercent > 50 ? [1, 1.08, 1] : 1 }}
+              transition={{ duration: 1.5, repeat: kittenPercent > 50 ? Infinity : 0, ease: 'easeInOut' }}
+            >
               {kittenPercent}%
-            </div>
+            </motion.div>
           </div>
-        </div>
+        </motion.div>
 
-        {/* Middle Area: Draw & Discard Piles with relative cable cord */}
+        {/* Middle Area: Draw & Discard Piles */}
         <div className="relative flex-1 flex flex-row items-center justify-center gap-10 md:gap-16 pointer-events-auto">
-          {/* Connecting Red Cable Cord */}
-          <svg className="absolute pointer-events-none z-0 -left-6 top-16 w-36 h-20 overflow-visible hidden md:block" fill="none">
-            <path 
-              d="M 5, 5 C 30, 60 90, 60 120, 15" 
-              stroke="#b91c1c" 
-              strokeWidth="3" 
-              strokeLinecap="round"
-              opacity="0.75"
-            />
-          </svg>
 
           {/* Draw Pile */}
           <div className="flex flex-col items-center relative">
             <AnimatePresence>
               {isShuffling && (
                 <>
+                  {/* 5 ghost cards fanning out in a dramatic circle */}
+                  {[0, 1, 2, 3, 4].map((i) => {
+                    const angle = (i - 2) * 35;
+                    const rad = (angle * Math.PI) / 180;
+                    const xTarget = Math.sin(rad) * 120;
+                    const yTarget = -Math.cos(rad) * 60 - 20;
+                    return (
+                      <motion.div
+                        key={`shuffle-ghost-${i}`}
+                        initial={{ scale: 0.3, opacity: 0, x: 0, y: 0, rotate: 0 }}
+                        animate={{
+                          scale: [0.3, 0.75, 0.75, 0.3],
+                          opacity: [0, 0.9, 0.9, 0],
+                          x: [0, xTarget, xTarget * 0.5, 0],
+                          y: [0, yTarget, yTarget * 0.3, 0],
+                          rotate: [0, angle, angle * 1.5, 0],
+                        }}
+                        exit={{ scale: 0.2, opacity: 0 }}
+                        transition={{ duration: 1.6, delay: i * 0.08, repeat: 0, ease: 'easeInOut' }}
+                        className="absolute top-0 left-0 pointer-events-none z-20"
+                      >
+                        <CardView disabled className="shadow-[0_0_25px_rgba(239,68,68,0.4)] border-red-500/30 w-24 sm:w-28 h-36 sm:h-42" />
+                      </motion.div>
+                    );
+                  })}
+                  {/* Shuffle text overlay */}
                   <motion.div
-                    key="shuffle-ghost-1"
-                    initial={{ scale: 0.5, opacity: 0 }}
-                    animate={{
-                      scale: 0.85,
-                      opacity: [0, 0.8, 0.8, 0],
-                      x: [-20, -80, 80, -20],
-                      y: [0, -10, -20, 0],
-                      rotate: [0, -15, 15, 0],
-                    }}
-                    exit={{ scale: 0.5, opacity: 0 }}
-                    transition={{ duration: 1.0 }}
-                    className="absolute top-0 left-0 pointer-events-none"
+                    key="shuffle-text"
+                    initial={{ opacity: 0, scale: 0.5 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.5 }}
+                    className="absolute -top-14 left-1/2 -translate-x-1/2 z-30 pointer-events-none"
                   >
-                    <CardView disabled className="shadow-[0_0_20px_rgba(239,68,68,0.3)] border-red-500/20 w-24 sm:w-28 h-36 sm:h-42" />
-                  </motion.div>
-                  <motion.div
-                    key="shuffle-ghost-2"
-                    initial={{ scale: 0.5, opacity: 0 }}
-                    animate={{
-                      scale: 0.85,
-                      opacity: [0, 0.8, 0.8, 0],
-                      x: [20, 80, -80, 20],
-                      y: [0, -20, -10, 0],
-                      rotate: [0, 15, -15, 0],
-                    }}
-                    exit={{ scale: 0.5, opacity: 0 }}
-                    transition={{ duration: 1.0, delay: 0.15 }}
-                    className="absolute top-0 left-0 pointer-events-none"
-                  >
-                    <CardView disabled className="shadow-[0_0_20px_rgba(239,68,68,0.3)] border-red-500/20 w-24 sm:w-28 h-36 sm:h-42" />
+                    <div className="flex items-center gap-2 bg-black/80 backdrop-blur-md border border-orange-500/40 px-4 py-2 rounded-full shadow-[0_0_30px_rgba(249,115,22,0.4)]">
+                      <motion.span 
+                        className="text-lg"
+                        animate={{ rotate: 360 }}
+                        transition={{ duration: 0.8, repeat: Infinity, ease: 'linear' }}
+                      >
+                        🔀
+                      </motion.span>
+                      <span className="font-cartoon text-orange-400 uppercase tracking-widest text-xs">Shuffling...</span>
+                    </div>
                   </motion.div>
                 </>
               )}
@@ -661,11 +934,11 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
 
             <motion.button 
               animate={isShuffling ? { 
-                x: [0, -10, 10, -10, 10, 0],
-                rotate: [0, -5, 5, -5, 5, 0],
-                scale: [1, 1.05, 1]
+                x: [0, -8, 8, -6, 6, -4, 4, 0],
+                rotate: [0, -4, 4, -3, 3, -2, 2, 0],
+                scale: [1, 1.06, 0.96, 1.04, 0.98, 1]
               } : {}}
-              transition={{ duration: 0.5, repeat: isShuffling ? Infinity : 0 }}
+              transition={{ duration: 0.6, repeat: isShuffling ? Infinity : 0, ease: 'easeInOut' }}
               onClick={() => isMyTurn && !isExploding && onAction({ type: 'DRAW_CARD' })}
               disabled={!isMyTurn || isExploding}
               className={`relative group transition-all duration-500 z-10 shrink-0 aspect-[2/3] w-24 sm:w-28 rounded-[1.2rem] p-1.5 bg-[#4d0c0c] border-4 border-[#e25c34]/80 shadow-[0_8px_20px_rgba(0,0,0,0.6)] ${
@@ -988,52 +1261,160 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
             initial={{ opacity: 0 }} 
             animate={{ opacity: 1 }} 
             exit={{ opacity: 0 }}
-            className="absolute inset-0 bg-black/85 backdrop-blur-3xl z-[60] flex flex-col items-center justify-center p-8 pointer-events-auto"
+            className="absolute inset-0 bg-black/90 backdrop-blur-3xl z-[60] flex flex-col items-center justify-center p-8 pointer-events-auto"
           >
-              <motion.h2 initial={{ y: -20 }} animate={{ y: 0 }} className="text-4xl font-cartoon text-pink-500 mb-4 uppercase tracking-tighter italic">
-                Seeing the Future
-              </motion.h2>
-              <p className="text-slate-400 mb-12 font-cartoon uppercase tracking-wider text-xs text-center">Top 3 cards of the deck (Left to Right)</p>
+              {/* Background animated orbs */}
+              <motion.div 
+                className="absolute w-96 h-96 rounded-full bg-purple-600/10 blur-[100px]"
+                animate={{ scale: [1, 1.3, 1], x: [-50, 50, -50], y: [-20, 20, -20] }}
+                transition={{ duration: 6, repeat: Infinity, ease: 'easeInOut' }}
+              />
+              <motion.div 
+                className="absolute w-64 h-64 rounded-full bg-pink-500/10 blur-[80px]"
+                animate={{ scale: [1.2, 1, 1.2], x: [30, -30, 30], y: [10, -30, 10] }}
+                transition={{ duration: 5, repeat: Infinity, ease: 'easeInOut' }}
+              />
+
+              {/* Title with eye icon */}
+              <motion.div 
+                initial={{ y: -40, opacity: 0 }} 
+                animate={{ y: 0, opacity: 1 }} 
+                transition={{ duration: 0.6, ease: 'easeOut' }}
+                className="flex flex-col items-center mb-10"
+              >
+                <motion.span 
+                  className="text-6xl mb-3"
+                  animate={{ scale: [1, 1.15, 1], rotate: [0, 5, -5, 0] }}
+                  transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
+                >
+                  🔮
+                </motion.span>
+                <h2 className="text-3xl sm:text-4xl font-cartoon text-transparent bg-clip-text bg-gradient-to-r from-purple-400 via-pink-500 to-fuchsia-400 uppercase tracking-tighter italic">
+                  See The Future
+                </h2>
+                <p className="text-slate-500 mt-2 font-cartoon uppercase tracking-wider text-[10px] text-center">
+                  Next 3 cards you will draw
+                </p>
+              </motion.div>
               
-              <div className="flex justify-center gap-8 mb-16">
-                 {gameState.futureCards.map((card, i) => (
-                   <motion.div 
-                      key={card.id} 
-                      initial={{ y: 100, opacity: 0, rotate: -20 }}
-                      animate={{ y: 0, opacity: 1, rotate: 0 }}
-                      transition={{ delay: i * 0.2, type: "spring" }}
-                   >
-                      <CardView card={card} disabled className="shadow-[0_0_50px_rgba(236,72,153,0.3)] border-pink-500/30" />
-                      <div className="mt-4 text-center">
-                         <span className="text-[10px] font-cartoon text-pink-500 uppercase tracking-widest bg-pink-500/10 px-3 py-1 rounded-full border border-pink-500/20">
-                           Pos {i + 1}
-                         </span>
-                      </div>
-                   </motion.div>
-                 ))}
+              <div className="flex justify-center gap-6 sm:gap-10 mb-14">
+                 {gameState.futureCards.map((card, i) => {
+                    const labels = ['TOP', '2nd', '3rd'];
+                    const labelColors = [
+                      'from-red-500 to-orange-500 border-red-500/40 shadow-[0_0_20px_rgba(239,68,68,0.4)]',
+                      'from-amber-500 to-yellow-500 border-amber-500/40 shadow-[0_0_20px_rgba(245,158,11,0.3)]',
+                      'from-sky-500 to-blue-500 border-sky-500/40 shadow-[0_0_20px_rgba(14,165,233,0.3)]',
+                    ];
+                    const glowColors = [
+                      'rgba(239,68,68,0.25)',
+                      'rgba(245,158,11,0.2)',
+                      'rgba(14,165,233,0.2)',
+                    ];
+                    return (
+                      <motion.div 
+                        key={card.id} 
+                        initial={{ y: 120, opacity: 0, rotateY: 180, scale: 0.5 }}
+                        animate={{ y: 0, opacity: 1, rotateY: 0, scale: 1 }}
+                        transition={{ 
+                          delay: 0.3 + i * 0.25, 
+                          type: 'spring', 
+                          stiffness: 80, 
+                          damping: 14,
+                          duration: 0.8 
+                        }}
+                        className="flex flex-col items-center"
+                        style={{ perspective: 800 }}
+                      >
+                        {/* Glow ring behind card */}
+                        <motion.div 
+                          className="absolute -inset-3 rounded-[2rem] blur-xl pointer-events-none"
+                          style={{ backgroundColor: glowColors[i] }}
+                          animate={{ opacity: [0.3, 0.7, 0.3], scale: [0.95, 1.05, 0.95] }}
+                          transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut', delay: i * 0.3 }}
+                        />
+                        <div className="relative">
+                          <CardView card={card} disabled className="w-28 sm:w-36 h-42 sm:h-54" />
+                        </div>
+                        <motion.div 
+                          className="mt-3 text-center"
+                          initial={{ opacity: 0, y: 10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ delay: 0.6 + i * 0.25 }}
+                        >
+                          <span className={`text-[10px] sm:text-xs font-cartoon uppercase tracking-widest px-4 py-1.5 rounded-full border bg-gradient-to-r text-white ${labelColors[i]}`}>
+                            {labels[i]}
+                          </span>
+                        </motion.div>
+                      </motion.div>
+                    );
+                 })}
               </div>
 
-              <button 
+              <motion.button 
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 1.2 }}
                 onClick={handleConfirmFuture}
-                className="px-12 py-4 rounded-full bg-white text-black font-cartoon uppercase tracking-widest hover:bg-pink-500 hover:text-white transition-all duration-500 shadow-2xl scale-110 active:scale-95"
+                whileHover={{ scale: 1.05, boxShadow: '0 0 40px rgba(168,85,247,0.5)' }}
+                whileTap={{ scale: 0.95 }}
+                className="px-12 py-4 rounded-full bg-gradient-to-r from-purple-600 to-pink-600 text-white font-cartoon uppercase tracking-widest shadow-2xl border border-purple-400/30 hover:from-purple-500 hover:to-pink-500 transition-all duration-300"
               >
-                Put Them Back
-              </button>
+                ✨ Got It ✨
+              </motion.button>
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* Explosions & Alerts */}
-      {gameState.waitingForDefuse && gameState.waitingForDefuse !== socketId && (
-        <div className="absolute top-24 left-1/2 -translate-x-1/2 z-30 bg-red-600/20 border border-red-500/50 backdrop-blur-xl px-6 py-3 rounded-2xl flex items-center gap-4 shadow-2xl">
-           <div className="w-10 h-10 rounded-full bg-red-600 flex items-center justify-center font-cartoon text-white animate-pulse">
-             {gameState.bombCountdown || 15}
-           </div>
-           <p className="font-cartoon text-red-200 uppercase tracking-wider text-[10px]">
-             {gameState.players.find(p => p.id === gameState.waitingForDefuse)?.name} is defusing!
-           </p>
-        </div>
-      )}
+      {/* Explosions & Alerts - Dramatic Defusing Banner */}
+      <AnimatePresence>
+        {gameState.waitingForDefuse && gameState.waitingForDefuse !== socketId && (
+          <motion.div
+            key="defusing-banner"
+            initial={{ y: -80, opacity: 0, scale: 0.8 }}
+            animate={{ y: 0, opacity: 1, scale: 1 }}
+            exit={{ y: -80, opacity: 0, scale: 0.8 }}
+            transition={{ type: 'spring', stiffness: 100, damping: 12 }}
+            className="absolute top-20 left-1/2 -translate-x-1/2 z-30 pointer-events-none"
+          >
+            <div className="relative bg-red-950/90 border-2 border-red-500/60 backdrop-blur-xl px-8 py-4 rounded-2xl flex items-center gap-5 shadow-[0_0_40px_rgba(220,38,38,0.5)]">
+              {/* Pulsing red glow behind */}
+              <motion.div 
+                className="absolute -inset-2 rounded-3xl bg-red-600/20 blur-xl pointer-events-none"
+                animate={{ opacity: [0.3, 0.7, 0.3], scale: [0.95, 1.05, 0.95] }}
+                transition={{ duration: 1.5, repeat: Infinity, ease: 'easeInOut' }}
+              />
+              <motion.div 
+                className="w-12 h-12 rounded-full bg-gradient-to-br from-red-500 to-red-700 flex items-center justify-center font-cartoon text-white text-xl border-2 border-red-400/50 shadow-[0_0_20px_rgba(220,38,38,0.6)] relative"
+                animate={{ scale: [1, 1.15, 1] }}
+                transition={{ duration: 1, repeat: Infinity, ease: 'easeInOut' }}
+              >
+                {gameState.bombCountdown || 15}
+              </motion.div>
+              <div className="flex flex-col">
+                <motion.span 
+                  className="text-xl mb-0.5"
+                  animate={{ rotate: [0, 10, -10, 0], scale: [1, 1.2, 1] }}
+                  transition={{ duration: 0.8, repeat: Infinity }}
+                >
+                  💣
+                </motion.span>
+                <p className="font-cartoon text-red-200 uppercase tracking-wider text-xs">
+                  {gameState.players.find(p => p.id === gameState.waitingForDefuse)?.name} is defusing!
+                </p>
+                <motion.div 
+                  className="h-1 bg-red-900 rounded-full mt-1.5 overflow-hidden"
+                >
+                  <motion.div
+                    className="h-full bg-gradient-to-r from-red-500 to-orange-500 rounded-full"
+                    animate={{ width: ['100%', '0%'] }}
+                    transition={{ duration: gameState.bombCountdown || 15, ease: 'linear' }}
+                  />
+                </motion.div>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Stealing Instruction Banner */}
       {isStealer && victim && (
@@ -1059,9 +1440,49 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
             exit={{ opacity: 0 }}
             className="absolute inset-0 bg-black/95 backdrop-blur-3xl flex flex-col items-center justify-center z-50 p-6 pointer-events-auto"
           >
-              <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,_rgba(220,38,38,0.15)_0%,_rgba(0,0,0,0.8)_80%)] pointer-events-none"></div>
+              {/* Animated fire rings */}
+              <motion.div 
+                className="absolute w-[500px] h-[500px] rounded-full border-2 border-red-500/20 pointer-events-none"
+                animate={{ scale: [0.5, 2], opacity: [0.6, 0] }}
+                transition={{ duration: 2, repeat: Infinity, ease: 'easeOut' }}
+              />
+              <motion.div 
+                className="absolute w-[400px] h-[400px] rounded-full border-2 border-orange-500/20 pointer-events-none"
+                animate={{ scale: [0.5, 2], opacity: [0.5, 0] }}
+                transition={{ duration: 2, repeat: Infinity, ease: 'easeOut', delay: 0.5 }}
+              />
+              <motion.div 
+                className="absolute w-[300px] h-[300px] rounded-full border-2 border-yellow-500/15 pointer-events-none"
+                animate={{ scale: [0.5, 2], opacity: [0.4, 0] }}
+                transition={{ duration: 2, repeat: Infinity, ease: 'easeOut', delay: 1.0 }}
+              />
+              <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,_rgba(220,38,38,0.2)_0%,_rgba(0,0,0,0.9)_70%)] pointer-events-none"></div>
               
-              <h2 className="text-7xl md:text-9xl font-cartoon text-transparent bg-clip-text bg-gradient-to-b from-red-400 to-red-600 mb-2 animate-bounce drop-shadow-[0_0_20px_rgba(220,38,38,0.8)]">KABOOM!</h2>
+              {/* Floating bomb emojis */}
+              {[...Array(6)].map((_, i) => (
+                <motion.span
+                  key={`bomb-${i}`}
+                  className="absolute text-3xl pointer-events-none"
+                  initial={{ x: 0, y: 0, opacity: 0 }}
+                  animate={{
+                    x: [0, (i % 2 ? 1 : -1) * (80 + i * 30)],
+                    y: [0, -(100 + i * 20)],
+                    opacity: [0, 1, 0],
+                    rotate: [0, (i % 2 ? 1 : -1) * 180],
+                  }}
+                  transition={{ duration: 2, delay: i * 0.3, repeat: Infinity, repeatDelay: 1 }}
+                >
+                  {i % 2 === 0 ? '💣' : '🔥'}
+                </motion.span>
+              ))}
+
+              <motion.h2 
+                className="text-7xl md:text-9xl font-cartoon text-transparent bg-clip-text bg-gradient-to-b from-red-400 via-orange-500 to-red-600 mb-2 drop-shadow-[0_0_30px_rgba(220,38,38,0.9)] relative z-10"
+                animate={{ scale: [1, 1.05, 1], rotate: [0, -2, 2, 0] }}
+                transition={{ duration: 0.5, repeat: Infinity, ease: 'easeInOut' }}
+              >
+                KABOOM!
+              </motion.h2>
               <p className="text-xl text-red-400 font-mono mb-8 uppercase tracking-[0.2em] animate-pulse">
                 [ SELF-DESTRUCT IN {gameState.bombCountdown ?? 15}s ]
               </p>
@@ -1151,7 +1572,38 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
                     </button>
                   </div>
                 </div>
-              ) : <p className="text-4xl font-mono text-red-500 animate-pulse uppercase tracking-widest mt-8 font-bold">NO DEFUSE CARD DETECTED</p>}
+              ) : (
+                <motion.div 
+                  className="flex flex-col items-center mt-8"
+                  initial={{ scale: 0 }}
+                  animate={{ scale: 1 }}
+                  transition={{ type: 'spring', stiffness: 80, damping: 10 }}
+                >
+                  <motion.span 
+                    className="text-8xl mb-4"
+                    animate={{ scale: [1, 1.2, 1], rotate: [0, -5, 5, 0] }}
+                    transition={{ duration: 0.8, repeat: Infinity }}
+                  >
+                    💀
+                  </motion.span>
+                  <div className="bg-red-950/80 border-2 border-red-500/50 rounded-2xl p-6 max-w-sm text-center relative overflow-hidden">
+                    <div className="absolute inset-0 opacity-10 bg-[repeating-linear-gradient(0deg,transparent,transparent_2px,rgba(255,0,0,0.3)_2px,rgba(255,0,0,0.3)_4px)] pointer-events-none"></div>
+                    <p className="text-3xl font-mono text-red-500 uppercase tracking-widest font-bold relative z-10 animate-pulse">
+                      FATAL ERROR
+                    </p>
+                    <p className="text-sm font-mono text-red-400/70 uppercase tracking-wider mt-2 relative z-10">
+                      No Defuse card in hand
+                    </p>
+                    <motion.p 
+                      className="text-lg font-cartoon text-red-300 uppercase tracking-widest mt-4 relative z-10"
+                      animate={{ opacity: [0.3, 1, 0.3] }}
+                      transition={{ duration: 1, repeat: Infinity }}
+                    >
+                      💥 GAME OVER 💥
+                    </motion.p>
+                  </div>
+                </motion.div>
+              )}
           </motion.div>
         )}
       </AnimatePresence>
@@ -1177,26 +1629,229 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
         )}
       </AnimatePresence>
 
+      {/* Defuse Success Celebration Overlay */}
+      <AnimatePresence>
+        {showDefuseSuccess && (
+          <motion.div
+            key="defuse-success"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="absolute inset-0 z-[55] pointer-events-none flex items-center justify-center"
+          >
+            {/* Green flash */}
+            <motion.div 
+              className="absolute inset-0 bg-emerald-500/10"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: [0, 0.3, 0] }}
+              transition={{ duration: 1.5 }}
+            />
+            {/* Celebration particles */}
+            {[...Array(12)].map((_, i) => {
+              const angle = (i / 12) * 360;
+              const rad = (angle * Math.PI) / 180;
+              return (
+                <motion.span
+                  key={`defuse-particle-${i}`}
+                  className="absolute text-2xl pointer-events-none"
+                  initial={{ scale: 0, opacity: 0 }}
+                  animate={{
+                    x: [0, Math.cos(rad) * 150],
+                    y: [0, Math.sin(rad) * 150],
+                    scale: [0, 1.2, 0],
+                    opacity: [0, 1, 0],
+                  }}
+                  transition={{ duration: 1.5, delay: i * 0.05, ease: 'easeOut' }}
+                >
+                  {['✨', '🛡️', '⭐', '💚'][i % 4]}
+                </motion.span>
+              );
+            })}
+            {/* Central shield icon */}
+            <motion.div
+              className="flex flex-col items-center"
+              initial={{ scale: 0, rotate: -180 }}
+              animate={{ scale: [0, 1.3, 1], rotate: 0 }}
+              exit={{ scale: 0, opacity: 0 }}
+              transition={{ type: 'spring', stiffness: 100, damping: 10 }}
+            >
+              <span className="text-8xl drop-shadow-[0_0_30px_rgba(16,185,129,0.8)]">🛡️</span>
+              <motion.p 
+                className="font-cartoon text-emerald-400 text-2xl uppercase tracking-widest mt-2 drop-shadow-lg"
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.3 }}
+              >
+                DEFUSED!
+              </motion.p>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
+      {/* Player Elimination Dramatic Overlay */}
+      <AnimatePresence>
+        {eliminatedPlayerId && (
+          <motion.div
+            key={`elimination-${eliminatedPlayerId}`}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.5 }}
+            className="absolute inset-0 z-[55] pointer-events-none flex items-center justify-center"
+          >
+            {/* Red flash background */}
+            <motion.div 
+              className="absolute inset-0 bg-red-600/15"
+              animate={{ opacity: [0, 0.4, 0.1, 0.3, 0] }}
+              transition={{ duration: 3 }}
+            />
+            {/* Explosion burst */}
+            {[...Array(8)].map((_, i) => {
+              const angle = (i / 8) * 360;
+              const rad = (angle * Math.PI) / 180;
+              return (
+                <motion.span
+                  key={`elim-particle-${i}`}
+                  className="absolute text-3xl pointer-events-none"
+                  initial={{ scale: 0, opacity: 0 }}
+                  animate={{
+                    x: [0, Math.cos(rad) * 200],
+                    y: [0, Math.sin(rad) * 200],
+                    scale: [0, 1.5, 0],
+                    opacity: [0, 1, 0],
+                    rotate: [0, 360],
+                  }}
+                  transition={{ duration: 2, delay: i * 0.06, ease: 'easeOut' }}
+                >
+                  {['💥', '🔥', '💀', '☠️', '💣', '🔥', '💥', '☠️'][i]}
+                </motion.span>
+              );
+            })}
+            {/* Central skull and player name */}
+            <motion.div
+              className="flex flex-col items-center z-10"
+              initial={{ scale: 0 }}
+              animate={{ scale: [0, 1.4, 1] }}
+              transition={{ type: 'spring', stiffness: 80, damping: 10 }}
+            >
+              <motion.span 
+                className="text-9xl drop-shadow-[0_0_40px_rgba(220,38,38,0.8)]"
+                animate={{ rotate: [0, -10, 10, 0], scale: [1, 1.1, 1] }}
+                transition={{ duration: 1, repeat: 2 }}
+              >
+                💀
+              </motion.span>
+              <motion.p 
+                className="font-cartoon text-red-400 text-3xl uppercase tracking-widest mt-3 drop-shadow-lg"
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: [0, 1, 1, 0], y: [20, 0, 0, -10] }}
+                transition={{ duration: 3, times: [0, 0.2, 0.7, 1] }}
+              >
+                {gameState.players.find(p => p.id === eliminatedPlayerId)?.name || 'Player'} ELIMINATED
+              </motion.p>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Combo Play Effect Overlay */}
+      <AnimatePresence>
+        {comboEffect && (
+          <motion.div
+            key={`combo-${comboEffect.type}`}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="absolute inset-0 z-[55] pointer-events-none flex items-center justify-center"
+          >
+            {/* Sparkle ring */}
+            <motion.div
+              className={`absolute w-64 h-64 rounded-full border-4 pointer-events-none ${
+                comboEffect.count === 3 ? 'border-fuchsia-500/30' : 'border-cyan-500/30'
+              }`}
+              initial={{ scale: 0.3, opacity: 0 }}
+              animate={{ scale: [0.3, 2], opacity: [0.8, 0] }}
+              transition={{ duration: 1.5, ease: 'easeOut' }}
+            />
+            <motion.div
+              className={`absolute w-48 h-48 rounded-full border-4 pointer-events-none ${
+                comboEffect.count === 3 ? 'border-purple-500/30' : 'border-blue-500/30'
+              }`}
+              initial={{ scale: 0.3, opacity: 0 }}
+              animate={{ scale: [0.3, 1.8], opacity: [0.6, 0] }}
+              transition={{ duration: 1.5, ease: 'easeOut', delay: 0.2 }}
+            />
+            {/* Combo text */}
+            <motion.div
+              className="flex flex-col items-center z-10"
+              initial={{ scale: 0, rotate: -20 }}
+              animate={{ scale: [0, 1.3, 1], rotate: 0 }}
+              exit={{ scale: 0, opacity: 0 }}
+              transition={{ type: 'spring', stiffness: 120, damping: 10 }}
+            >
+              <motion.span 
+                className="text-6xl drop-shadow-lg"
+                animate={{ rotate: [0, 15, -15, 0] }}
+                transition={{ duration: 0.6, repeat: 2 }}
+              >
+                {comboEffect.count === 3 ? '🐱🐱🐱' : '🐱🐱'}
+              </motion.span>
+              <motion.p 
+                className={`font-cartoon text-2xl uppercase tracking-widest mt-2 drop-shadow-lg ${
+                  comboEffect.count === 3 ? 'text-fuchsia-400' : 'text-cyan-400'
+                }`}
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.2 }}
+              >
+                {comboEffect.count === 3 ? '3 OF A KIND!' : 'PAIR COMBO!'}
+              </motion.p>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* 3-of-a-Kind Guess Modal */}
       {showGuessModal && (
         <div className="absolute inset-0 bg-black/90 backdrop-blur-2xl flex flex-col items-center justify-center z-[90] p-4 pointer-events-auto">
-          <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="bg-slate-950 border border-slate-800 p-8 rounded-[3rem] max-w-xl w-full text-center shadow-2xl">
-            <h3 className="text-3xl font-cartoon text-white mb-2 uppercase tracking-tighter">Guess Card</h3>
-            <p className="text-slate-500 mb-6 text-xs font-cartoon uppercase tracking-widest">Select what they might have</p>
-            <div className="flex flex-wrap justify-center gap-2 mb-8 max-h-[30vh] overflow-y-auto custom-scrollbar">
+          <motion.div initial={{ scale: 0.85, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ type: 'spring', stiffness: 100, damping: 12 }} className="bg-slate-950 border border-slate-800 p-8 rounded-[3rem] max-w-xl w-full text-center shadow-[0_0_60px_rgba(0,0,0,0.8)] relative overflow-hidden">
+            {/* Background orbs */}
+            <motion.div 
+              className="absolute w-48 h-48 rounded-full bg-fuchsia-600/5 blur-[60px] -top-10 -right-10"
+              animate={{ scale: [1, 1.3, 1] }}
+              transition={{ duration: 4, repeat: Infinity, ease: 'easeInOut' }}
+            />
+            <motion.span 
+              className="text-4xl mb-2 block"
+              animate={{ rotate: [0, 10, -10, 0], scale: [1, 1.1, 1] }}
+              transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
+            >
+              🔍
+            </motion.span>
+            <h3 className="text-3xl font-cartoon text-transparent bg-clip-text bg-gradient-to-r from-fuchsia-400 to-cyan-400 mb-2 uppercase tracking-tighter relative z-10">Guess Card</h3>
+            <p className="text-slate-500 mb-6 text-xs font-cartoon uppercase tracking-widest relative z-10">Select what they might have</p>
+            <div className="flex flex-wrap justify-center gap-2 mb-8 max-h-[30vh] overflow-y-auto custom-scrollbar relative z-10">
                {Object.values(CardType).filter(t => t !== 'EXPLODING_KITTEN').map(type => (
-                 <button 
+                 <motion.button 
                    key={type} 
                    onClick={() => handlePlayCombo(type)} 
-                   className="px-4 py-2.5 rounded-xl bg-white/5 border border-white/5 hover:bg-orange-500 hover:text-white text-[10px] font-cartoon uppercase tracking-wider transition-all"
+                   whileHover={{ scale: 1.08, boxShadow: '0 0 20px rgba(168,85,247,0.4)' }}
+                   whileTap={{ scale: 0.95 }}
+                   className="px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 hover:bg-gradient-to-r hover:from-fuchsia-600/30 hover:to-purple-600/30 hover:border-fuchsia-500/40 hover:text-white text-slate-300 text-[10px] font-cartoon uppercase tracking-wider transition-all"
                  >
                    {type.replace(/_/g, ' ')}
-                 </button>
+                 </motion.button>
                ))}
             </div>
-            <button onClick={() => setShowGuessModal(false)} className="text-slate-500 hover:text-white font-cartoon uppercase tracking-widest text-xs transition-colors">Cancel</button>
+            <motion.button 
+              onClick={() => setShowGuessModal(false)} 
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              className="text-slate-500 hover:text-white font-cartoon uppercase tracking-widest text-xs transition-colors bg-white/5 px-6 py-2 rounded-full border border-white/10 hover:border-white/20 relative z-10"
+            >
+              Cancel
+            </motion.button>
           </motion.div>
         </div>
       )}

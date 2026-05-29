@@ -42,8 +42,22 @@ export const CardView: React.FC<CardViewProps> = ({ card, onClick, disabled, cla
             />
           ) : (
             <>
+              {/* Premium crosshatch pattern */}
+              <div className="absolute inset-0 opacity-[0.06] bg-[repeating-conic-gradient(rgba(255,255,255,0.4)_0%_25%,transparent_0%_50%)] bg-[length:12px_12px] z-0"></div>
+              {/* Radial glow */}
+              <div className="absolute inset-0 opacity-30 bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-red-600/40 via-transparent to-transparent z-0"></div>
+              {/* Top-right highlight */}
               <div className="absolute inset-0 opacity-20 bg-[radial-gradient(circle_at_top_right,_var(--tw-gradient-stops))] from-red-500 via-transparent to-transparent z-0"></div>
-              <span className="text-red-500/80 font-black text-2xl sm:text-4xl select-none tracking-tighter drop-shadow-md z-10">EK</span>
+              {/* Center cat silhouette */}
+              <div className="flex flex-col items-center justify-center z-10 relative">
+                <span className="text-3xl sm:text-4xl select-none drop-shadow-md opacity-80">🐱</span>
+                <span className="text-red-400/60 font-black text-[10px] sm:text-xs select-none tracking-[0.2em] mt-1 uppercase">Exploding</span>
+              </div>
+              {/* Corner decorations */}
+              <div className="absolute top-2 left-2 w-1.5 h-1.5 rounded-full bg-red-500/30 z-10"></div>
+              <div className="absolute top-2 right-2 w-1.5 h-1.5 rounded-full bg-red-500/30 z-10"></div>
+              <div className="absolute bottom-2 left-2 w-1.5 h-1.5 rounded-full bg-red-500/30 z-10"></div>
+              <div className="absolute bottom-2 right-2 w-1.5 h-1.5 rounded-full bg-red-500/30 z-10"></div>
             </>
           )}
           {/* Holographic Top Glare */}

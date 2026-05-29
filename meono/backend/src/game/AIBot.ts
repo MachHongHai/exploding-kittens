@@ -395,8 +395,9 @@ export class AIBotController {
       return { type: 'DEFUSE', insertIndex };
     }
 
+    const alivePlayers = this.game.players.filter(p => !p.isEliminated).length;
     const remainingCards = this.game.drawPile.length;
-    const isEndGame = remainingCards <= 10;
+    const isEndGame = remainingCards <= alivePlayers * 2.5;
 
     // Check memory for bomb
     const bombInRangeIndex = player.knownDeckTop.findIndex((c: any, idx: number) => 
@@ -429,7 +430,14 @@ export class AIBotController {
         console.log(`[AIBot - Medium] Bot ${player.name} playing defense skip/attack under danger/attack.`);
         return { type: 'PLAY_CARDS', cardIds: [skipOrAttack.id] };
       }
-      if (shuffleCard) {
+      
+      // Scout before shuffling if we don't know what's coming
+      if (seeFutureCard && player.knownDeckTop.length === 0) {
+        console.log(`[AIBot - Medium] Bot ${player.name} scouting with See The Future under danger.`);
+        return { type: 'PLAY_CARDS', cardIds: [seeFutureCard.id] };
+      }
+
+      if (shuffleCard && isBombDanger) {
         console.log(`[AIBot - Medium] Bot ${player.name} playing shuffle under danger.`);
         return { type: 'PLAY_CARDS', cardIds: [shuffleCard.id] };
       }
@@ -633,11 +641,12 @@ ${historyDesc}
     const handSize = player.handCount;
     const hasDefuse = player.hand.some(c => c.type === CardType.DEFUSE);
     
-    // Check if bot knows the top card of the deck is a bomb
     const isTopCardBomb = player.knownDeckTop.length > 0 && 
                           player.knownDeckTop[0].cardType === CardType.EXPLODING_KITTEN;
 
-    const isEarlyGame = deckSize > 15;
+    const aliveCount = this.game.players.filter(p => !p.isEliminated).length;
+    const isEarlyGame = deckSize > aliveCount * 4.5;
+    const lateGameThreshold = Math.ceil(aliveCount * 2.5);
 
     // Easy bots: simple 25% chance of noping if targeted, never counter-nope
     if (difficulty === 'EASY') {
@@ -662,7 +671,7 @@ ${historyDesc}
 
       // 2. Attack / Skip: Counter-nope only if we are in danger (bomb known at top or we have no Defuse card in late game)
       if (cardType === CardType.ATTACK || cardType === CardType.SKIP) {
-        const inDanger = isTopCardBomb || (!hasDefuse && deckSize <= 8);
+        const inDanger = isTopCardBomb || (!hasDefuse && deckSize <= lateGameThreshold);
         if (inDanger) {
           console.log(`[AIBot - Nope] Bot ${player.name} counter-nopes to save itself from drawing (Action: ${cardType}).`);
           return { type: 'PLAY_NOPE', cardId: nopeCard.id };
@@ -675,7 +684,7 @@ ${historyDesc}
       if (action.actionType === '2-CARD' || action.actionType === '3-CARD') {
         const targetPlayer = this.game.players.find(p => p.id === action.targetId);
         const targetHasDefuse = targetPlayer?.hasDefuse();
-        if (deckSize <= 8 && !hasDefuse && targetHasDefuse) {
+        if (deckSize <= lateGameThreshold && !hasDefuse && targetHasDefuse) {
           console.log(`[AIBot - Nope] Bot ${player.name} counter-nopes combo to steal Defuse from ${targetPlayer?.name}.`);
           return { type: 'PLAY_NOPE', cardId: nopeCard.id };
         }
@@ -692,7 +701,6 @@ ${historyDesc}
       // E.g., someone attacked the Leader. The Leader Noped it. We should Counter-Nope the Leader to ensure the attack hits!
       const lastNoper = this.game.players.find(p => p.id === action.lastNoperId);
       if (lastNoper && lastNoper.id !== botId) {
-        const aliveCount = this.game.players.filter(p => !p.isEliminated).length;
         const totalCards = this.game.players.filter(p => !p.isEliminated).reduce((sum, p) => sum + p.handCount, 0);
         const avgCards = aliveCount > 0 ? totalCards / aliveCount : 0;
         
@@ -754,7 +762,7 @@ ${historyDesc}
 
       // Mid/Late game logic: Protect hand if small or late game
       const protectingDefuse = hasDefuse && handSize <= 3;
-      const isLateGame = deckSize <= 8;
+      const isLateGame = deckSize <= lateGameThreshold;
       if (protectingDefuse || isLateGame || Math.random() < 0.3) {
         console.log(`[AIBot - Nope] Bot ${player.name} Nopes combo/favor from ${this.game.players.find(p => p.id === action.playerId)?.name} to protect its hand.`);
         return { type: 'PLAY_NOPE', cardId: nopeCard.id };
@@ -783,7 +791,7 @@ ${historyDesc}
         }
 
         // Nope the Attack only if we are in danger (no Defuse or deck is late game)
-        if (!hasDefuse || deckSize <= 8) {
+        if (!hasDefuse || deckSize <= lateGameThreshold) {
           console.log(`[AIBot - Nope] Bot ${player.name} Nopes Attack from opponent due to danger.`);
           return { type: 'PLAY_NOPE', cardId: nopeCard.id };
         }
@@ -847,8 +855,11 @@ ${historyDesc}
         lastAction.targetId === botId &&
         this.game.getCurrentPlayer().id === botId) {
       
+      const aliveCount = this.game.players.filter(p => !p.isEliminated).length;
+      const lateGameThreshold = Math.ceil(aliveCount * 2.5);
+      
       // Nope the Attack/Skip if we are in danger (no Defuse or deck is late game) or 50% chance normally
-      if (!hasDefuse || deckSize <= 8 || Math.random() < 0.5) {
+      if (!hasDefuse || deckSize <= lateGameThreshold || Math.random() < 0.5) {
         console.log(`[AIBot - LateNope] Bot ${player.name} plays late Nope to revert the ${lastAction.type}.`);
         return { type: 'PLAY_NOPE', cardId: nopeCard.id };
       }
@@ -954,10 +965,16 @@ ${historyDesc}
     // Threat assessment
     const bombsInDeck = this.game.drawPile.filter(c => c.type === CardType.EXPLODING_KITTEN).length;
     const bombProbability = deckSize > 0 ? bombsInDeck / deckSize : 0;
-    const isCriticalDeck = deckSize <= 3;
-    const isEndGame = deckSize <= 6;
-    const isMidGame = deckSize > 6 && deckSize <= 12;
-    const isEarlyGame = deckSize > 12;
+    
+    // Dynamic thresholds based on alive players
+    const criticalThreshold = alivePlayers;
+    const endGameThreshold = alivePlayers * 2.5;
+    const midGameThreshold = alivePlayers * 4.5;
+
+    const isCriticalDeck = deckSize <= criticalThreshold;
+    const isEndGame = deckSize <= endGameThreshold && deckSize > criticalThreshold;
+    const isMidGame = deckSize <= midGameThreshold && deckSize > endGameThreshold;
+    const isEarlyGame = deckSize > midGameThreshold;
     const isDangerZone = (bombInDrawRange || isBombOnTop) || (isBombSuspected && !isTopCardSafe);
 
     // ==========================================
@@ -1005,8 +1022,6 @@ ${historyDesc}
     // ==========================================
     // RULE 1: UNDER ATTACK (turnsToPlay > 1)
     // ==========================================
-    // When attacked, the priority is to escape without drawing.
-    // Expert move: Chain Attack BACK → opponent takes even more turns (stacking pressure).
     if (player.turnsToPlay > 1) {
       // 1a. CHAIN ATTACK (offensive counter) - force pressure back onto opponents
       if (attackCards.length > 0) {
@@ -1018,19 +1033,39 @@ ${historyDesc}
         console.log(`[Expert] ${player.name}: Using Skip to reduce attack pressure (${player.turnsToPlay} → ${player.turnsToPlay - 1} turns).`);
         return { type: 'PLAY_CARDS', cardIds: [skipCards[0].id] };
       }
-      // 1c. Shuffle if bomb suspected (we must draw, so at least randomize)
-      if ((isDangerZone || isBombSuspected) && shuffleCards.length > 0) {
-        console.log(`[Expert] ${player.name}: Shuffling deck under attack with bomb suspicion.`);
-        return { type: 'PLAY_CARDS', cardIds: [shuffleCards[0].id] };
-      }
-      // 1d. Scout before forced draw
+      // 1c. Scout before forced draw or shuffle
       if (seeFutureCards.length > 0 && player.knownDeckTop.length === 0) {
         console.log(`[Expert] ${player.name}: Scouting deck before forced draw under attack.`);
         return { type: 'PLAY_CARDS', cardIds: [seeFutureCards[0].id] };
       }
-      // 1e. No escape available - must draw
+      // 1d. Shuffle if bomb known or strongly suspected
+      if (isDangerZone && shuffleCards.length > 0) {
+        console.log(`[Expert] ${player.name}: Shuffling deck under attack with bomb danger.`);
+        return { type: 'PLAY_CARDS', cardIds: [shuffleCards[0].id] };
+      }
+      
+      // 1e. DESPERATION: No escape cards. Try Combos/Favor before drawing!
+      if (isDangerZone && target && target.handCount > 0) {
+        if (tripletType) {
+          const preferred = !hasDefuse ? CardType.DEFUSE : CardType.ATTACK;
+          const requestedType = this.getBestCardTypeToRequest(target, preferred);
+          console.log(`[Expert] ${player.name}: DESPERATE 3-of-a-kind under attack!`);
+          return { type: 'PLAY_CARDS', cardIds: counts[tripletType].slice(0, 3), targetId: target.id, requestedCardType: requestedType as any };
+        }
+        if (pairType) {
+          console.log(`[Expert] ${player.name}: DESPERATE pair steal under attack!`);
+          return { type: 'PLAY_CARDS', cardIds: counts[pairType].slice(0, 2), targetId: target.id };
+        }
+        if (favorCards.length > 0) {
+          const favorTarget = getBestFavorTarget() || target;
+          console.log(`[Expert] ${player.name}: DESPERATE Favor on ${favorTarget.name} under attack!`);
+          return { type: 'PLAY_CARDS', cardIds: [favorCards[0].id], targetId: favorTarget.id };
+        }
+      }
+
+      // 1f. No escape available - must draw
       console.log(`[Expert] ${player.name}: No escape cards under attack. Drawing.`);
-      return { type: 'DRAW_CARD' };
+      return this.getLastResortAction(botId) || { type: 'DRAW_CARD' };
     }
 
     // ==========================================
