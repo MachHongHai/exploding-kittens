@@ -211,62 +211,102 @@ export class AIBotController {
     let bestTarget = opponents[0];
     let highestScore = -Infinity;
 
+    // Determine bot's mindset for this specific action
+    // 70% chance to target leaders/hoarders (Standard), 30% chance to target the weakest link (Ruthless)
+    const isRuthless = Math.random() < 0.3;
+
+    const aliveCount = this.game.players.filter(p => !p.isEliminated).length;
+    const totalCards = this.game.players.filter(p => !p.isEliminated).reduce((sum, p) => sum + p.handCount, 0);
+    const avgCards = aliveCount > 0 ? totalCards / aliveCount : 0;
+
     opponents.forEach(p => {
-      // 1. Base score from hand count (more cards = higher value target)
-      let score = p.handCount * 1.5;
+      let score = 0;
+
+      if (isRuthless) {
+        // "Ruthless Execution" Mode: Eliminate the weak
+        // High score for players with very few cards, making them prime targets for elimination
+        score += Math.max(0, (7 - p.handCount)) * 3.0; 
+        if (p.handCount <= 2) {
+          score += 25.0; // Massive bonus for targeting someone on the brink of death
+        }
+      } else {
+        // "Eat the Rich" Mode: Target hoarders and leaders
+        score += p.handCount * 1.5;
+        
+        if (p.handCount >= avgCards + 2) {
+          score += (p.handCount - avgCards) * 4.0; 
+          if (p.handCount >= avgCards + 4) score += 20.0; // Heavy penalty for the clear leader
+        }
+      }
 
       // 2. Turn order pressure (target next player to reduce their defensive options right before they draw)
       if (p.id === nextPlayer.id) {
         score += 6.0;
       }
 
-      // 3. Defuse card strategic targeting
+      // 3. Defuse card strategic targeting (Vulnerability Exploitation)
       const opponentHasDefuse = p.hasDefuse();
       if (!botHasDefuse) {
-        // If the bot has NO Defuse card, it should prioritize stealing from players who actually have a Defuse card!
+        // We desperately need a Defuse, so prioritize stealing from those who have it
         if (opponentHasDefuse) {
-          score += 10.0;
+          score += 15.0; // Increased priority
         }
       } else {
-        // If the bot already has a Defuse, it's still good to steal a Defuse, but stealing from a player who has NO Defuse
-        // might leave them completely defenseless and eliminate them on their next turn!
+        // We are safe, let's try to eliminate vulnerable players!
         if (!opponentHasDefuse) {
-          score += 4.0;
+          score += 20.0; // Massive score for targeting unprotected players
         }
       }
 
-      // 4. Retaliation / Play history (check if they targeted us recently in the action history)
+      // 4. Retaliation / Play history (The Grudge System)
       const targetName = p.name;
       const botName = bot?.name || "";
-      let retaliationCount = 0;
+      let revengeScore = 0;
       
       const gameWithHistory = this.game as any;
       if (gameWithHistory.actionHistory) {
         const history: string[] = gameWithHistory.actionHistory;
-        // Check the last 10 actions for aggression against this bot
-        const recentHistory = history.slice(-10);
+        // Check the entire history (max 30 actions), giving more weight to recent actions
+        const totalActions = history.length;
+        
         let lastActionByBot = false;
-        recentHistory.forEach(action => {
-          if (action.includes(targetName) && (
-            action.includes("played Favor on " + botName) || 
-            action.includes("played a Pair on " + botName) || 
-            action.includes("Three of a kind on " + botName) || 
-            action.includes("stole from " + botName)
-          )) {
-            retaliationCount++;
+        
+        history.forEach((action, idx) => {
+          // Calculate recency weight (from 1.0 for oldest to 3.0 for newest)
+          const recencyWeight = 1.0 + (idx / totalActions) * 2.0; 
+          
+          if (action.includes(targetName)) {
+            // Direct aggression against the bot
+            if (
+              action.includes("played Favor on " + botName) || 
+              action.includes("played a Pair on " + botName) || 
+              action.includes("Three of a kind on " + botName) || 
+              action.includes("stole from " + botName)
+            ) {
+              revengeScore += 8.0 * recencyWeight;
+            }
+            // Indirect aggression (e.g. playing Attack on the bot, but the action string might just say "played an Attack card")
+            // Wait, Attack cards don't have targets in the action string, they affect the next player. 
+            // We rely on direct targeted actions here.
           }
+          
+          // Noping the bot's actions is the ultimate offense
           if (action.includes(`${botName} played`)) {
             lastActionByBot = true;
           } else if (action.includes("Nope!")) {
             if (lastActionByBot && action.includes(targetName)) {
-              retaliationCount++;
+              revengeScore += 12.0 * recencyWeight; // Massive grudge for Noping us!
             }
           } else {
             lastActionByBot = false;
           }
         });
       }
-      score += retaliationCount * 8.0; // Add 8 points for each recent aggressive action against us
+      
+      score += revengeScore;
+
+      // Add a slight randomness to break ties or prevent perfectly predictable behavior
+      score += Math.random() * 2.0;
 
       if (score > highestScore) {
         highestScore = score;
@@ -434,9 +474,9 @@ export class AIBotController {
         counts[c.type].push(c.id);
       });
 
-      // Triplets (3-of-a-kind)
+      // Triplets (3-of-a-kind) - Ultimate priority
       const tripletType = this.getValidComboType(counts, 3, false);
-      if (tripletType && Math.random() > 0.6) {
+      if (tripletType) {
         const preferred = player.hasDefuse() ? CardType.ATTACK : CardType.DEFUSE;
         const requestedType = this.getBestCardTypeToRequest(target, preferred);
         console.log(`[AIBot - Medium] Playing 3-of-a-kind requesting ${requestedType} from ${target.name}.`);
@@ -641,8 +681,24 @@ ${historyDesc}
     }
 
     // --- CASE 2: Noping an opponent's action ---
-    // We only Nope if the action is currently active/successful (nopeCount is even: 0, 2, etc.)
-    if (action.nopeCount % 2 !== 0) return null;
+    // Normally, we only Nope if the action is currently active/successful (nopeCount is even: 0, 2, etc.)
+    if (action.nopeCount % 2 !== 0) {
+      // PRO COLLUSION: If the action is currently NOPED (odd count), it might have been Noped by the LEADER to save themselves!
+      // E.g., someone attacked the Leader. The Leader Noped it. We should Counter-Nope the Leader to ensure the attack hits!
+      const lastNoper = this.game.players.find(p => p.id === action.lastNoperId);
+      if (lastNoper && lastNoper.id !== botId) {
+        const aliveCount = this.game.players.filter(p => !p.isEliminated).length;
+        const totalCards = this.game.players.filter(p => !p.isEliminated).reduce((sum, p) => sum + p.handCount, 0);
+        const avgCards = aliveCount > 0 ? totalCards / aliveCount : 0;
+        
+        // If the noper is a massive hoarder/leader, and we have a Nope, we counter-nope them to bleed their cards and force the action!
+        if (lastNoper.handCount >= avgCards + 3 && Math.random() < 0.6) {
+          console.log(`[AIBot - Nope] Bot ${player.name} Counter-Nopes ${lastNoper.name} purely because they are the LEADER (Collusion)!`);
+          return { type: 'PLAY_NOPE', cardId: nopeCard.id };
+        }
+      }
+      return null;
+    }
 
     const cardType = action.cards[0]?.type;
     const isTargeted = action.targetId === botId;
@@ -688,6 +744,22 @@ ${historyDesc}
         // Nope the Attack only if we are in danger (no Defuse or deck is late game)
         if (!hasDefuse || deckSize <= 8) {
           console.log(`[AIBot - Nope] Bot ${player.name} Nopes Attack from opponent due to danger.`);
+          return { type: 'PLAY_NOPE', cardId: nopeCard.id };
+        }
+      }
+    }
+
+    // 5. Collusion: Gang up on the Leader (Third-party Nope)
+    // If a player has a massive advantage (e.g., they have >= avg + 3 cards), and they play a combo or favor against someone else,
+    // we might Nope them just to bleed their cards and protect the other weak players!
+    if (!isTargeted && action.playerId !== botId && (cardType === CardType.FAVOR || action.actionType === '2-CARD' || action.actionType === '3-CARD')) {
+      const activePlayer = this.game.players.find(p => p.id === action.playerId);
+      const aliveCount = this.game.players.filter(p => !p.isEliminated).length;
+      const totalCards = this.game.players.filter(p => !p.isEliminated).reduce((sum, p) => sum + p.handCount, 0);
+      if (activePlayer && aliveCount >= 3) {
+        const avgCards = totalCards / aliveCount;
+        if (activePlayer.handCount >= avgCards + 3 && Math.random() < 0.4) {
+          console.log(`[AIBot - Nope] Bot ${player.name} Nopes ${activePlayer.name}'s action purely because they are the LEADER (Collusion)!`);
           return { type: 'PLAY_NOPE', cardId: nopeCard.id };
         }
       }
@@ -1010,6 +1082,48 @@ ${historyDesc}
     }
 
     // ==========================================
+    // RULE 3.5: OFFENSIVE REVENGE (The Grudge System)
+    // ==========================================
+    // If the next player has severely wronged us recently, punish them with an Attack.
+    let nextIdx = (this.game.currentPlayerIndex + 1) % this.game.players.length;
+    while (this.game.players[nextIdx].isEliminated) {
+      nextIdx = (nextIdx + 1) % this.game.players.length;
+    }
+    const nextPlayerObj = this.game.players[nextIdx];
+    
+    let nextPlayerRevengeScore = 0;
+    if ((this.game as any).actionHistory) {
+      const history = (this.game as any).actionHistory as string[];
+      let lastActionByBot = false;
+      history.forEach((action, idx) => {
+        const recencyWeight = 1.0 + (idx / history.length) * 2.0; 
+        if (action.includes(nextPlayerObj.name) && (
+          action.includes("played Favor on " + player.name) || 
+          action.includes("played a Pair on " + player.name) || 
+          action.includes("Three of a kind on " + player.name) || 
+          action.includes("stole from " + player.name)
+        )) {
+          nextPlayerRevengeScore += 8.0 * recencyWeight;
+        }
+        if (action.includes(`${player.name} played`)) {
+          lastActionByBot = true;
+        } else if (action.includes("Nope!")) {
+          if (lastActionByBot && action.includes(nextPlayerObj.name)) {
+            nextPlayerRevengeScore += 12.0 * recencyWeight;
+          }
+        } else {
+          lastActionByBot = false;
+        }
+      });
+    }
+
+    // If revenge score is very high (> 15), unleash an Attack aggressively
+    if (nextPlayerRevengeScore >= 15.0 && attackCards.length > 0 && Math.random() > 0.2) {
+      console.log(`[Expert] ${player.name}: REVENGE TIME! Playing Attack aggressively to punish ${nextPlayerObj.name}!`);
+      return { type: 'PLAY_CARDS', cardIds: [attackCards[0].id] };
+    }
+
+    // ==========================================
     // RULE 4: END GAME (≤ 6 cards in deck)
     // ==========================================
     if (isEndGame) {
@@ -1088,21 +1202,15 @@ ${historyDesc}
 
       // 5a. Steal cards with Cat Card combos (building resources for endgame)
       if (target && target.handCount > 0) {
-        // Triplet: steal a specific card type
+        // Triplet: steal a specific card type (Ultimate priority)
         if (tripletType) {
-          if (!hasDefuse) {
-            // Priority: steal Defuse for survival
-            const defuseHolder = this.game.players.find(p => p.id !== botId && !p.isEliminated && p.hasDefuse() && p.handCount > 0);
-            const stealTarget = defuseHolder || target;
-            const requestedType = this.getBestCardTypeToRequest(stealTarget, CardType.DEFUSE);
-            console.log(`[Expert] ${player.name}: Mid game 3-of-a-kind for ${requestedType} from ${stealTarget.name}.`);
-            return { type: 'PLAY_CARDS', cardIds: counts[tripletType].slice(0, 3), targetId: stealTarget.id, requestedCardType: requestedType as any };
-          } else if (Math.random() > 0.4) {
-            // We have Defuse already. Steal opponent's Nope to reduce their defense.
-            const requestedType = this.getBestCardTypeToRequest(target, CardType.NOPE);
-            console.log(`[Expert] ${player.name}: Mid game 3-of-a-kind for ${requestedType} from ${target.name}.`);
-            return { type: 'PLAY_CARDS', cardIds: counts[tripletType].slice(0, 3), targetId: target.id, requestedCardType: requestedType as any };
-          }
+          const preferred = !hasDefuse ? CardType.DEFUSE : CardType.NOPE;
+          const stealTarget = !hasDefuse
+            ? (this.game.players.find(p => p.id !== botId && !p.isEliminated && p.hasDefuse() && p.handCount > 0) || target)
+            : target;
+          const requestedType = this.getBestCardTypeToRequest(stealTarget, preferred);
+          console.log(`[Expert] ${player.name}: Mid game 3-of-a-kind for ${requestedType} from ${stealTarget.name}.`);
+          return { type: 'PLAY_CARDS', cardIds: counts[tripletType].slice(0, 3), targetId: stealTarget.id, requestedCardType: requestedType as any };
         }
         // Pair: random steal, good for resource building
         if (pairType && Math.random() > 0.3) {
@@ -1141,13 +1249,9 @@ ${historyDesc}
     // Low bomb probability. Focus on resource accumulation.
     console.log(`[Expert] ${player.name}: Early game (${deckSize} cards). Resource accumulation phase.`);
 
-    // 6a. Cat Card combos for free steals
+    // 6a. Cat Card combos for free steals (Triplets have ultimate priority)
     if (target && target.handCount > 0) {
-      if (pairType && Math.random() > 0.3) {
-        console.log(`[Expert] ${player.name}: Early game pair steal from ${target.name}.`);
-        return { type: 'PLAY_CARDS', cardIds: counts[pairType].slice(0, 2), targetId: target.id };
-      }
-      if (tripletType && Math.random() > 0.3) {
+      if (tripletType) {
         // Early game: steal Defuse if we don't have one, otherwise steal Attack for defense stockpile
         const preferred = !hasDefuse ? CardType.DEFUSE : CardType.ATTACK;
         const tripletTarget = !hasDefuse
@@ -1156,6 +1260,10 @@ ${historyDesc}
         const requestedType = this.getBestCardTypeToRequest(tripletTarget, preferred);
         console.log(`[Expert] ${player.name}: Early game 3-of-a-kind for ${requestedType} from ${tripletTarget.name}.`);
         return { type: 'PLAY_CARDS', cardIds: counts[tripletType].slice(0, 3), targetId: tripletTarget.id, requestedCardType: requestedType as any };
+      }
+      if (pairType && Math.random() > 0.3) {
+        console.log(`[Expert] ${player.name}: Early game pair steal from ${target.name}.`);
+        return { type: 'PLAY_CARDS', cardIds: counts[pairType].slice(0, 2), targetId: target.id };
       }
     }
 
