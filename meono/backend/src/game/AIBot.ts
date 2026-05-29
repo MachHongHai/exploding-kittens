@@ -66,31 +66,24 @@ export class AIBotController {
     minCount: number, 
     allowValuable: boolean
   ): string | null {
-    // Prioritize Cat Cards first
+    // Cat Cards are the ONLY cards that should be used as combos under normal circumstances.
+    // Their sole purpose IS to be played as pairs/triplets. Action cards are always more valuable
+    // for their effects (Skip, Attack, etc.) than as combo fodder.
     const catTypes = Object.keys(counts).filter(type => type.startsWith('CAT_CARD') && counts[type].length >= minCount);
     if (catTypes.length > 0) return catTypes[0];
 
-    const deckSize = this.game.drawPile.length;
-    const isDesperate = allowValuable || deckSize <= 3;
-
-    // Then functional cards
-    const otherTypes = Object.keys(counts).filter(type => {
-      if (counts[type].length < minCount) return false;
-      if (type.startsWith('CAT_CARD')) return false;
-
-      // NEVER use DEFUSE or NOPE as combos (too valuable)
-      if (type === CardType.DEFUSE || type === CardType.NOPE) return false;
-
-      // If desperate (bomb imminent or deck almost empty), allow using anything else (SKIP, ATTACK, etc.) to steal a potential Defuse
-      if (isDesperate) return true;
-
-      // Otherwise, only allow if we have a strict excess of them (e.g. 3 Skips to make a pair, leaving 1 Skip for defense)
-      if (counts[type].length >= minCount + 1) return true;
-
-      return false;
-    });
-    
-    if (otherTypes.length > 0) return otherTypes[0];
+    // Only in absolute desperation (bomb imminent, no escape, no defuse) do we sacrifice action cards as combos.
+    // This is a Hail Mary play - the bot is about to die and has nothing else to try.
+    if (allowValuable) {
+      const desperateTypes = Object.keys(counts).filter(type => {
+        if (counts[type].length < minCount) return false;
+        if (type.startsWith('CAT_CARD')) return false;
+        // Even in desperation, NEVER sacrifice Defuse or Nope
+        if (type === CardType.DEFUSE || type === CardType.NOPE) return false;
+        return true;
+      });
+      if (desperateTypes.length > 0) return desperateTypes[0];
+    }
 
     return null;
   }
@@ -612,222 +605,414 @@ ${historyDesc}
 
   private takeHardRuleTurn(botId: string, requiresDefuse: boolean): PlayerAction {
     const player = this.game.players.find(p => p.id === botId)!;
+    const hand = player.hand;
+    const deckSize = this.game.drawPile.length;
+    const hasDefuse = player.hasDefuse();
+    const alivePlayers = this.game.players.filter(p => !p.isEliminated).length;
 
-    // --- 0. HANDLE DEFUSE REQUIRED ---
+    // ==========================================
+    // PHASE 0: DEFUSE PLACEMENT (Expert-level)
+    // ==========================================
     if (requiresDefuse) {
+      // After defusing, turnsToPlay is decremented by 1.
+      // If we still have more draws left, we MUST place the bomb deep enough to not draw it again ourselves.
+      const remainingDrawsAfterDefuse = player.turnsToPlay - 1;
+
+      if (remainingDrawsAfterDefuse > 0) {
+        // We're under Attack and still have draws remaining. Place bomb PAST our remaining draws.
+        const safeDepth = Math.min(remainingDrawsAfterDefuse + 1, this.game.drawPile.length);
+        console.log(`[Expert] ${player.name}: Under attack with ${remainingDrawsAfterDefuse} draws left. Placing bomb at depth ${safeDepth} to avoid self-draw.`);
+        return { type: 'DEFUSE', insertIndex: safeDepth };
+      }
+
+      // This is our last draw. Next player will draw after us.
       let nextIndex = (this.game.currentPlayerIndex + 1) % this.game.players.length;
       while (this.game.players[nextIndex].isEliminated) {
         nextIndex = (nextIndex + 1) % this.game.players.length;
       }
       const nextPlayer = this.game.players[nextIndex];
-      const hasDefuse = nextPlayer.hasDefuse();
-      
-      // If the next player has no Defuse, place bomb on top (index 0) to eliminate them immediately!
-      if (!hasDefuse) {
-        console.log(`[AIBot - Hard] Bot ${player.name} placing bomb at index 0 to eliminate defuse-less ${nextPlayer.name}!`);
+
+      if (!nextPlayer.hasDefuse()) {
+        // KILL SHOT: Next player has no Defuse → place on top for instant elimination
+        console.log(`[Expert] ${player.name}: KILL SHOT! Placing bomb on top to eliminate defuse-less ${nextPlayer.name}!`);
         return { type: 'DEFUSE', insertIndex: 0 };
-      } else {
-        // Next player has defuse. Try to place it strategically.
-        let insertIndex = 0;
-        if (nextPlayer.turnsToPlay > 1) {
-          insertIndex = Math.random() > 0.4 ? 1 : 0;
-        } else {
-          const rand = Math.random();
-          if (rand < 0.6) {
-            insertIndex = 0; // Put it on top (60% chance)
-          } else if (rand < 0.9) {
-            insertIndex = 1; // Put it second card (30% chance)
-          } else {
-            insertIndex = Math.min(2, this.game.drawPile.length); // Put it third card (10% chance)
-          }
-        }
-        console.log(`[AIBot - Hard] Bot ${player.name} placing bomb at index ${insertIndex} against defuse-carrying ${nextPlayer.name}.`);
-        return { type: 'DEFUSE', insertIndex };
       }
+
+      // Next player HAS Defuse. Force them to waste it by placing on top.
+      // In competitive play, draining an opponent's Defuse is almost as good as killing them.
+      // Mix in position 1 occasionally (they might See The Future + Skip past index 0).
+      const insertIndex = Math.random() < 0.75 ? 0 : 1;
+      console.log(`[Expert] ${player.name}: Placing bomb at index ${insertIndex} to drain ${nextPlayer.name}'s Defuse.`);
+      return { type: 'DEFUSE', insertIndex };
     }
 
-    // --- 1. CORE VARIABLES & STATE ANALYSIS ---
-    const remainingCards = this.game.drawPile.length;
-    const isEndGame = remainingCards <= 8; // End game phase
-    const isMidGame = remainingCards > 8;
-
-    // Check if we know exactly where a bomb is from See the Future
-    const bombInRangeIndex = player.knownDeckTop.findIndex((c: any, idx: number) => 
-      c.cardType === CardType.EXPLODING_KITTEN && idx < player.turnsToPlay
-    );
-    const isBombKnown = bombInRangeIndex !== -1;
-
-    // Check if we suspect a bomb (e.g. someone recently defused and we are in the draw range of the suspicion window)
-    const lastDefuse = (this.game as any).lastDefuseAction;
-    const isBombSuspected = lastDefuse && 
-                            lastDefuse.playerId !== botId && 
-                            lastDefuse.drawsSinceDefuse < 3;
-
-    // Top card status from memory
-    const isTopCardSafe = player.knownDeckTop.length > 0 && 
+    // ==========================================
+    // PHASE 1: INTELLIGENCE GATHERING
+    // ==========================================
+    // Bomb knowledge from See The Future memory
+    const isBombOnTop = player.knownDeckTop.length > 0 &&
+                        player.knownDeckTop[0].cardType === CardType.EXPLODING_KITTEN;
+    const isTopCardSafe = player.knownDeckTop.length > 0 &&
                           player.knownDeckTop[0].cardType !== CardType.EXPLODING_KITTEN;
+    const bombInDrawRange = player.knownDeckTop.findIndex((c: any, idx: number) =>
+      c.cardType === CardType.EXPLODING_KITTEN && idx < player.turnsToPlay
+    ) !== -1;
 
-    // Bomb danger flag
-    let isBombDanger = (isBombKnown || isBombSuspected) && !isTopCardSafe;
+    // Suspicion from recent defuses by other players
+    const lastDefuse = (this.game as any).lastDefuseAction;
+    const isBombSuspected = lastDefuse &&
+                            lastDefuse.playerId !== botId &&
+                            lastDefuse.drawsSinceDefuse < 2;
 
-    // --- 2. GATHER AVAILABLE CARDS IN HAND ---
-    const hand = player.hand;
-    const attackCard = hand.find(c => c.type === CardType.ATTACK);
-    const skipCard = hand.find(c => c.type === CardType.SKIP);
-    const seeFutureCard = hand.find(c => c.type === CardType.SEE_THE_FUTURE);
-    const shuffleCard = hand.find(c => c.type === CardType.SHUFFLE);
-    const favorCard = hand.find(c => c.type === CardType.FAVOR);
+    // Threat assessment
+    const bombsInDeck = this.game.drawPile.filter(c => c.type === CardType.EXPLODING_KITTEN).length;
+    const bombProbability = deckSize > 0 ? bombsInDeck / deckSize : 0;
+    const isCriticalDeck = deckSize <= 3;
+    const isEndGame = deckSize <= 6;
+    const isMidGame = deckSize > 6 && deckSize <= 12;
+    const isEarlyGame = deckSize > 12;
+    const isDangerZone = (bombInDrawRange || isBombOnTop) || (isBombSuspected && !isTopCardSafe);
 
-    // Group cat cards / pairs / triplets
+    // ==========================================
+    // PHASE 2: HAND INVENTORY
+    // ==========================================
+    const attackCards = hand.filter(c => c.type === CardType.ATTACK);
+    const skipCards = hand.filter(c => c.type === CardType.SKIP);
+    const seeFutureCards = hand.filter(c => c.type === CardType.SEE_THE_FUTURE);
+    const shuffleCards = hand.filter(c => c.type === CardType.SHUFFLE);
+    const favorCards = hand.filter(c => c.type === CardType.FAVOR);
+    const nopeCards = hand.filter(c => c.type === CardType.NOPE);
+    const escapeCount = attackCards.length + skipCards.length; // Cards that avoid drawing
+
+    // Cat Card combos (the ONLY cards that should be used as combos normally)
     const counts: Record<string, string[]> = {};
     hand.forEach(c => {
       if (!counts[c.type]) counts[c.type] = [];
       counts[c.type].push(c.id);
     });
-
-    // Check desperation mode: bomb is imminent, we have NO defuse in hand, and NO escape cards (skip, attack, shuffle)
-    const hasDefuse = player.hasDefuse();
-    const isDesperation = isBombDanger && !hasDefuse && !attackCard && !skipCard && !shuffleCard;
-
-    const tripletType = this.getValidComboType(counts, 3, isDesperation);
+    const isDesperation = isDangerZone && !hasDefuse && escapeCount === 0 && shuffleCards.length === 0;
     const pairType = this.getValidComboType(counts, 2, isDesperation);
+    const tripletType = this.getValidComboType(counts, 3, isDesperation);
 
-    // Find opponents and select strategic target
-    const richestOpponent = this.selectStrategicTarget(botId);
+    // Strategic target selection
+    const target = this.selectStrategicTarget(botId);
 
-    // --- 3. DECISION-MAKING FLOW ---
+    // Helper: find the best target for Favor (player with fewest cards = highest chance of stealing Defuse)
+    const getBestFavorTarget = (): any => {
+      const candidates = this.game.players.filter(p => p.id !== botId && !p.isEliminated && p.handCount > 0);
+      if (candidates.length === 0) return null;
+      // Prioritize: (1) player who has Defuse and fewest cards, (2) player with fewest cards
+      const defuseHolders = candidates.filter(p => p.hasDefuse()).sort((a, b) => a.handCount - b.handCount);
+      if (defuseHolders.length > 0 && !hasDefuse) return defuseHolders[0]; // Steal from smallest-hand Defuse holder
+      return candidates.sort((a, b) => a.handCount - b.handCount)[0]; // Smallest hand = highest value per card
+    };
 
-    // Case 3a: We know top card is SAFE. Do NOT play any defensive/high-value cards. Just draw!
+    // ==========================================
+    // RULE 0: TOP CARD IS SAFE → DRAW (conserve everything)
+    // ==========================================
     if (isTopCardSafe) {
-      console.log(`[AIBot - Hard] Bot ${player.name} knows top card is safe. Saving cards and drawing.`);
+      console.log(`[Expert] ${player.name}: Top card is safe. Conserving resources, drawing.`);
       return { type: 'DRAW_CARD' };
     }
 
-    // Case 3b: Imminent/Suspected Bomb Danger
-    if (isBombDanger) {
-      console.log(`[AIBot - Hard] Bot ${player.name} detects bomb danger (Known: ${isBombKnown}, Suspected: ${isBombSuspected}).`);
+    // ==========================================
+    // RULE 1: UNDER ATTACK (turnsToPlay > 1)
+    // ==========================================
+    // When attacked, the priority is to escape without drawing.
+    // Expert move: Chain Attack BACK → opponent takes even more turns (stacking pressure).
+    if (player.turnsToPlay > 1) {
+      // 1a. CHAIN ATTACK (offensive counter) - force pressure back onto opponents
+      if (attackCards.length > 0) {
+        console.log(`[Expert] ${player.name}: CHAIN ATTACK! Reflecting attack pressure back.`);
+        return { type: 'PLAY_CARDS', cardIds: [attackCards[0].id] };
+      }
+      // 1b. Skip to reduce turn count by 1
+      if (skipCards.length > 0) {
+        console.log(`[Expert] ${player.name}: Using Skip to reduce attack pressure (${player.turnsToPlay} → ${player.turnsToPlay - 1} turns).`);
+        return { type: 'PLAY_CARDS', cardIds: [skipCards[0].id] };
+      }
+      // 1c. Shuffle if bomb suspected (we must draw, so at least randomize)
+      if ((isDangerZone || isBombSuspected) && shuffleCards.length > 0) {
+        console.log(`[Expert] ${player.name}: Shuffling deck under attack with bomb suspicion.`);
+        return { type: 'PLAY_CARDS', cardIds: [shuffleCards[0].id] };
+      }
+      // 1d. Scout before forced draw
+      if (seeFutureCards.length > 0 && player.knownDeckTop.length === 0) {
+        console.log(`[Expert] ${player.name}: Scouting deck before forced draw under attack.`);
+        return { type: 'PLAY_CARDS', cardIds: [seeFutureCards[0].id] };
+      }
+      // 1e. No escape available - must draw
+      console.log(`[Expert] ${player.name}: No escape cards under attack. Drawing.`);
+      return { type: 'DRAW_CARD' };
+    }
 
-      // 1. If we suspect a bomb but don't know for sure, try to verify using See The Future first!
-      if (isBombSuspected && !isBombKnown && seeFutureCard && player.knownDeckTop.length === 0) {
-        console.log(`[AIBot - Hard] Playing See The Future to verify the suspected bomb.`);
-        return { type: 'PLAY_CARDS', cardIds: [seeFutureCard.id] };
+    // ==========================================
+    // RULE 2: BOMB IMMINENT (confirmed or strongly suspected)
+    // ==========================================
+    if (isDangerZone) {
+      const threatLevel = isBombOnTop ? 'CONFIRMED ON TOP' : (bombInDrawRange ? 'IN DRAW RANGE' : 'SUSPECTED');
+      console.log(`[Expert] ${player.name}: BOMB ${threatLevel}! Survival protocol activated.`);
+
+      // 2a. If only suspected (not confirmed), verify with See The Future before wasting escape cards
+      if (!isBombOnTop && !bombInDrawRange && seeFutureCards.length > 0 && player.knownDeckTop.length === 0) {
+        console.log(`[Expert] ${player.name}: Verifying suspected bomb with See The Future before committing escape cards.`);
+        return { type: 'PLAY_CARDS', cardIds: [seeFutureCards[0].id] };
       }
 
-      // 2. Play Skip or Attack to avoid drawing the bomb.
-      // Prioritize Attack if the opponent has no Defuse card (lethal pressure) or if we have multiple attacks.
-      if (attackCard || skipCard) {
-        const opponentHasNoDefuse = richestOpponent && !richestOpponent.hasDefuse();
-        if (attackCard && (opponentHasNoDefuse || !skipCard)) {
-          console.log(`[AIBot - Hard] Playing Attack to bypass bomb and target ${richestOpponent?.name}.`);
-          return { type: 'PLAY_CARDS', cardIds: [attackCard.id] };
-        }
-        if (skipCard) {
-          console.log(`[AIBot - Hard] Playing Skip to bypass bomb.`);
-          return { type: 'PLAY_CARDS', cardIds: [skipCard.id] };
-        }
+      // 2b. Attack (BEST escape: skip your draw AND punish opponent with 2 extra turns over the bomb)
+      if (attackCards.length > 0) {
+        // Prefer Attack over Skip when a vulnerable opponent exists (no Defuse = potential kill)
+        const vulnerableOpponent = this.game.players.find(p => p.id !== botId && !p.isEliminated && !p.hasDefuse());
+        console.log(`[Expert] ${player.name}: Playing Attack to escape bomb${vulnerableOpponent ? ` (targeting defuse-less ${vulnerableOpponent.name})` : ''}!`);
+        return { type: 'PLAY_CARDS', cardIds: [attackCards[0].id] };
       }
 
-      // 3. Play Shuffle to randomize the deck since we have no Skip/Attack.
-      if (shuffleCard) {
-        console.log(`[AIBot - Hard] No skip/attack available. Playing Shuffle to randomize bomb.`);
-        return { type: 'PLAY_CARDS', cardIds: [shuffleCard.id] };
+      // 2c. Skip (safe escape, no extra pressure on opponents)
+      if (skipCards.length > 0) {
+        console.log(`[Expert] ${player.name}: Playing Skip to dodge bomb.`);
+        return { type: 'PLAY_CARDS', cardIds: [skipCards[0].id] };
       }
 
-      // 4. Try to steal a defense card (Attack/Skip/Defuse) using Triplet, Pair, or Favor.
-      if (richestOpponent && richestOpponent.handCount > 0) {
+      // 2d. Shuffle (no Skip/Attack available - randomize bomb position as last resort)
+      if (shuffleCards.length > 0) {
+        console.log(`[Expert] ${player.name}: No escape cards! Shuffling to randomize bomb.`);
+        return { type: 'PLAY_CARDS', cardIds: [shuffleCards[0].id] };
+      }
+
+      // 2e. DESPERATION: No escape cards at all. Try stealing defense with combos or Favor.
+      if (target && target.handCount > 0) {
         if (tripletType) {
-          const requestedType = richestOpponent.hasDefuse() ? CardType.DEFUSE : CardType.ATTACK;
-          console.log(`[AIBot - Hard] Emergency 3-of-a-kind on ${richestOpponent.name} requesting ${requestedType}.`);
-          return { type: 'PLAY_CARDS', cardIds: counts[tripletType].slice(0, 3), targetId: richestOpponent.id, requestedCardType: requestedType as any };
+          // Request Defuse if we don't have one, otherwise request Attack/Skip
+          const requestedType = !hasDefuse ? CardType.DEFUSE : CardType.ATTACK;
+          console.log(`[Expert] ${player.name}: DESPERATE 3-of-a-kind for ${requestedType} from ${target.name}!`);
+          return { type: 'PLAY_CARDS', cardIds: counts[tripletType].slice(0, 3), targetId: target.id, requestedCardType: requestedType as any };
         }
         if (pairType) {
-          console.log(`[AIBot - Hard] Playing Pair on ${richestOpponent.name} to steal defense.`);
-          return { type: 'PLAY_CARDS', cardIds: counts[pairType].slice(0, 2), targetId: richestOpponent.id };
+          console.log(`[Expert] ${player.name}: DESPERATE pair steal from ${target.name}!`);
+          return { type: 'PLAY_CARDS', cardIds: counts[pairType].slice(0, 2), targetId: target.id };
         }
-        if (favorCard) {
-          console.log(`[AIBot - Hard] Playing Favor on ${richestOpponent.name} to request defense.`);
-          return { type: 'PLAY_CARDS', cardIds: [favorCard.id], targetId: richestOpponent.id };
+        if (favorCards.length > 0) {
+          const favorTarget = getBestFavorTarget() || target;
+          console.log(`[Expert] ${player.name}: DESPERATE Favor on ${favorTarget.name}!`);
+          return { type: 'PLAY_CARDS', cardIds: [favorCards[0].id], targetId: favorTarget.id };
         }
       }
+
+      // Truly no options. Draw and hope for Defuse.
+      console.log(`[Expert] ${player.name}: No options left. Drawing into danger.`);
+      return { type: 'DRAW_CARD' };
     }
 
-    // Case 3c: End Game Phase (Deck <= 8 cards) - Risk is generally high even if no specific bomb is suspected yet.
+    // ==========================================
+    // RULE 3: CRITICAL DECK (≤ 3 cards left)
+    // ==========================================
+    // Every draw is life-threatening. Play hyper-defensively.
+    if (isCriticalDeck) {
+      console.log(`[Expert] ${player.name}: CRITICAL DECK (${deckSize} cards). Hyper-defensive mode.`);
+
+      // 3a. Always scout before drawing
+      if (seeFutureCards.length > 0 && player.knownDeckTop.length === 0) {
+        console.log(`[Expert] ${player.name}: Critical scouting with See The Future.`);
+        return { type: 'PLAY_CARDS', cardIds: [seeFutureCards[0].id] };
+      }
+
+      // 3b. Use Attack/Skip to avoid drawing entirely
+      if (attackCards.length > 0) {
+        console.log(`[Expert] ${player.name}: Critical Attack to avoid drawing.`);
+        return { type: 'PLAY_CARDS', cardIds: [attackCards[0].id] };
+      }
+      if (skipCards.length > 0) {
+        console.log(`[Expert] ${player.name}: Critical Skip to avoid drawing.`);
+        return { type: 'PLAY_CARDS', cardIds: [skipCards[0].id] };
+      }
+
+      // 3c. Try to steal Defuse if we don't have one
+      if (!hasDefuse && target && target.handCount > 0) {
+        if (tripletType) {
+          const defuseHolder = this.game.players.find(p => p.id !== botId && !p.isEliminated && p.hasDefuse() && p.handCount > 0);
+          if (defuseHolder) {
+            console.log(`[Expert] ${player.name}: Critical 3-of-a-kind for Defuse from ${defuseHolder.name}!`);
+            return { type: 'PLAY_CARDS', cardIds: counts[tripletType].slice(0, 3), targetId: defuseHolder.id, requestedCardType: CardType.DEFUSE as any };
+          }
+        }
+        if (pairType) {
+          console.log(`[Expert] ${player.name}: Critical pair steal from ${target.name}.`);
+          return { type: 'PLAY_CARDS', cardIds: counts[pairType].slice(0, 2), targetId: target.id };
+        }
+        if (favorCards.length > 0) {
+          const favorTarget = getBestFavorTarget() || target;
+          console.log(`[Expert] ${player.name}: Critical Favor on ${favorTarget.name}.`);
+          return { type: 'PLAY_CARDS', cardIds: [favorCards[0].id], targetId: favorTarget.id };
+        }
+      }
+
+      // 3d. Shuffle as last resort if unknown deck
+      if (shuffleCards.length > 0 && player.knownDeckTop.length === 0) {
+        console.log(`[Expert] ${player.name}: Critical Shuffle to randomize before forced draw.`);
+        return { type: 'PLAY_CARDS', cardIds: [shuffleCards[0].id] };
+      }
+
+      console.log(`[Expert] ${player.name}: Critical draw (no options left).`);
+      return { type: 'DRAW_CARD' };
+    }
+
+    // ==========================================
+    // RULE 4: END GAME (≤ 6 cards in deck)
+    // ==========================================
     if (isEndGame) {
-      console.log(`[AIBot - Hard] Bot ${player.name} is in End Game (draw pile: ${remainingCards}). Playing tactically.`);
+      console.log(`[Expert] ${player.name}: End game (${deckSize} cards left). Tactical play.`);
 
-      // 1. Play See The Future to inspect what's coming before making decisions.
-      if (seeFutureCard && player.knownDeckTop.length === 0) {
-        console.log(`[AIBot - Hard] End Game: Playing See The Future to inspect top cards.`);
-        return { type: 'PLAY_CARDS', cardIds: [seeFutureCard.id] };
+      // 4a. ALWAYS scout before drawing if we have no intel
+      if (seeFutureCards.length > 0 && player.knownDeckTop.length === 0) {
+        console.log(`[Expert] ${player.name}: End game scouting.`);
+        return { type: 'PLAY_CARDS', cardIds: [seeFutureCards[0].id] };
       }
 
-      // 2. Play high-value defensive cards if we have to draw and don't know if it's safe (preventative defense)
-      if (player.turnsToPlay > 1 || Math.random() > 0.4) {
-        if (skipCard) {
-          console.log(`[AIBot - Hard] End Game: Playing Skip preventatively.`);
-          return { type: 'PLAY_CARDS', cardIds: [skipCard.id] };
+      // 4b. Strip opponent's Defuse - this wins end games
+      if (!hasDefuse && target && target.handCount > 0) {
+        // 3-of-a-kind to specifically steal Defuse
+        if (tripletType) {
+          const defuseHolder = this.game.players.find(p => p.id !== botId && !p.isEliminated && p.hasDefuse() && p.handCount > 0);
+          if (defuseHolder) {
+            console.log(`[Expert] ${player.name}: End game hunting Defuse from ${defuseHolder.name} with 3-of-a-kind.`);
+            return { type: 'PLAY_CARDS', cardIds: counts[tripletType].slice(0, 3), targetId: defuseHolder.id, requestedCardType: CardType.DEFUSE as any };
+          }
         }
-        if (attackCard) {
-          console.log(`[AIBot - Hard] End Game: Playing Attack preventatively.`);
-          return { type: 'PLAY_CARDS', cardIds: [attackCard.id] };
+        // Pair steal (can't choose card type, but better than nothing)
+        if (pairType) {
+          console.log(`[Expert] ${player.name}: End game pair steal from ${target.name}.`);
+          return { type: 'PLAY_CARDS', cardIds: counts[pairType].slice(0, 2), targetId: target.id };
+        }
+        // Favor (target player with fewest cards for highest chance of Defuse)
+        if (favorCards.length > 0) {
+          const favorTarget = getBestFavorTarget() || target;
+          console.log(`[Expert] ${player.name}: End game Favor on ${favorTarget.name} (${favorTarget.handCount} cards, high value per steal).`);
+          return { type: 'PLAY_CARDS', cardIds: [favorCards[0].id], targetId: favorTarget.id };
         }
       }
 
-      // 3. Strategic stealing to strip opponent's defenses in the final phase
-      if (richestOpponent && richestOpponent.handCount > 0) {
-        if (tripletType && Math.random() > 0.5) {
-          const requestedType = richestOpponent.hasDefuse() ? CardType.DEFUSE : CardType.ATTACK;
-          console.log(`[AIBot - Hard] End Game: Playing 3-of-a-kind on ${richestOpponent.name} requesting ${requestedType}.`);
-          return { type: 'PLAY_CARDS', cardIds: counts[tripletType].slice(0, 3), targetId: richestOpponent.id, requestedCardType: requestedType as any };
-        }
-        if (pairType && Math.random() > 0.6) {
-          console.log(`[AIBot - Hard] End Game: Playing Pair on ${richestOpponent.name} to strip defense.`);
-          return { type: 'PLAY_CARDS', cardIds: counts[pairType].slice(0, 2), targetId: richestOpponent.id };
-        }
-        if (favorCard && Math.random() > 0.6) {
-          console.log(`[AIBot - Hard] End Game: Playing Favor on ${richestOpponent.name} to strip defense.`);
-          return { type: 'PLAY_CARDS', cardIds: [favorCard.id], targetId: richestOpponent.id };
-        }
-      }
-    }
-
-    // Case 3d: Early/Mid Game Phase (Deck > 8 cards) - Save valuable cards!
-    if (isMidGame) {
-      // 1. Use Favor, Pairs, and Triplets early to build hand size and steal opponent's cards.
-      // This is a great way to build resources for the end game.
-      if (richestOpponent && richestOpponent.handCount > 0 && player.handCount > 3) {
-        if (tripletType && Math.random() > 0.3) {
-          const requestedType = richestOpponent.hasDefuse() ? CardType.DEFUSE : CardType.ATTACK;
-          console.log(`[AIBot - Hard] Mid Game: Playing 3-of-a-kind on ${richestOpponent.name} requesting ${requestedType}.`);
-          return { type: 'PLAY_CARDS', cardIds: counts[tripletType].slice(0, 3), targetId: richestOpponent.id, requestedCardType: requestedType as any };
+      // 4c. If we already have Defuse, still use combos to weaken opponents
+      if (hasDefuse && target && target.handCount > 0) {
+        if (tripletType) {
+          // Steal their Nope to prevent them from blocking our plays
+          console.log(`[Expert] ${player.name}: End game stripping ${target.name}'s Nope with 3-of-a-kind.`);
+          return { type: 'PLAY_CARDS', cardIds: counts[tripletType].slice(0, 3), targetId: target.id, requestedCardType: CardType.NOPE as any };
         }
         if (pairType && Math.random() > 0.4) {
-          console.log(`[AIBot - Hard] Mid Game: Playing Pair on ${richestOpponent.name} strategically.`);
-          return { type: 'PLAY_CARDS', cardIds: counts[pairType].slice(0, 2), targetId: richestOpponent.id };
-        }
-        if (favorCard && Math.random() > 0.5) {
-          console.log(`[AIBot - Hard] Mid Game: Playing Favor on ${richestOpponent.name} strategically.`);
-          return { type: 'PLAY_CARDS', cardIds: [favorCard.id], targetId: richestOpponent.id };
+          console.log(`[Expert] ${player.name}: End game pair steal from ${target.name}.`);
+          return { type: 'PLAY_CARDS', cardIds: counts[pairType].slice(0, 2), targetId: target.id };
         }
       }
 
-      // 2. Do NOT play Attack, Skip, or See The Future unless we have an excess of them (e.g. > 2 skips, or > 2 attacks)
-      // to keep them for the critical end game.
-      const attacks = hand.filter(c => c.type === CardType.ATTACK);
-      const skips = hand.filter(c => c.type === CardType.SKIP);
-      
-      if (attacks.length >= 2 && Math.random() > 0.7) {
-        console.log(`[AIBot - Hard] Mid Game: Playing excess Attack.`);
-        return { type: 'PLAY_CARDS', cardIds: [attacks[0].id] };
+      // 4d. Preemptive Skip/Attack if no intel on deck and bomb probability is high
+      if (player.knownDeckTop.length === 0 && bombProbability >= 0.25) {
+        if (skipCards.length > 1) { // Only use Skip if we have a spare
+          console.log(`[Expert] ${player.name}: End game preemptive Skip (high bomb probability: ${(bombProbability * 100).toFixed(0)}%).`);
+          return { type: 'PLAY_CARDS', cardIds: [skipCards[0].id] };
+        }
+        if (attackCards.length > 1) {
+          console.log(`[Expert] ${player.name}: End game preemptive Attack (high bomb probability).`);
+          return { type: 'PLAY_CARDS', cardIds: [attackCards[0].id] };
+        }
       }
-      if (skips.length >= 2 && Math.random() > 0.7) {
-        console.log(`[AIBot - Hard] Mid Game: Playing excess Skip.`);
-        return { type: 'PLAY_CARDS', cardIds: [skips[0].id] };
+
+      // 4e. Shuffle if someone recently defused (bomb near top)
+      if (isBombSuspected && shuffleCards.length > 0) {
+        console.log(`[Expert] ${player.name}: End game Shuffle after recent opponent defuse.`);
+        return { type: 'PLAY_CARDS', cardIds: [shuffleCards[0].id] };
+      }
+
+      console.log(`[Expert] ${player.name}: End game drawing (calculated risk).`);
+      return { type: 'DRAW_CARD' };
+    }
+
+    // ==========================================
+    // RULE 5: MID GAME (7-12 cards in deck)
+    // ==========================================
+    if (isMidGame) {
+      console.log(`[Expert] ${player.name}: Mid game (${deckSize} cards left). Building advantage.`);
+
+      // 5a. Steal cards with Cat Card combos (building resources for endgame)
+      if (target && target.handCount > 0) {
+        // Triplet: steal a specific card type
+        if (tripletType) {
+          if (!hasDefuse) {
+            // Priority: steal Defuse for survival
+            const defuseHolder = this.game.players.find(p => p.id !== botId && !p.isEliminated && p.hasDefuse() && p.handCount > 0);
+            if (defuseHolder) {
+              console.log(`[Expert] ${player.name}: Mid game 3-of-a-kind for Defuse from ${defuseHolder.name}.`);
+              return { type: 'PLAY_CARDS', cardIds: counts[tripletType].slice(0, 3), targetId: defuseHolder.id, requestedCardType: CardType.DEFUSE as any };
+            }
+          } else if (Math.random() > 0.4) {
+            // We have Defuse already. Steal opponent's Nope to reduce their defense.
+            console.log(`[Expert] ${player.name}: Mid game 3-of-a-kind for Nope from ${target.name}.`);
+            return { type: 'PLAY_CARDS', cardIds: counts[tripletType].slice(0, 3), targetId: target.id, requestedCardType: CardType.NOPE as any };
+          }
+        }
+        // Pair: random steal, good for resource building
+        if (pairType && Math.random() > 0.3) {
+          console.log(`[Expert] ${player.name}: Mid game pair steal from ${target.name}.`);
+          return { type: 'PLAY_CARDS', cardIds: counts[pairType].slice(0, 2), targetId: target.id };
+        }
+      }
+
+      // 5b. Favor (good value mid-game for resource building)
+      if (favorCards.length > 0 && target && target.handCount > 0 && Math.random() > 0.4) {
+        const favorTarget = getBestFavorTarget() || target;
+        console.log(`[Expert] ${player.name}: Mid game Favor on ${favorTarget.name}.`);
+        return { type: 'PLAY_CARDS', cardIds: [favorCards[0].id], targetId: favorTarget.id };
+      }
+
+      // 5c. Scout with See The Future only if deck is getting risky
+      if (seeFutureCards.length > 0 && player.knownDeckTop.length === 0 && Math.random() > 0.6) {
+        console.log(`[Expert] ${player.name}: Mid game scouting with See The Future.`);
+        return { type: 'PLAY_CARDS', cardIds: [seeFutureCards[0].id] };
+      }
+
+      // 5d. Shuffle if bomb suspected from recent defuse
+      if (isBombSuspected && shuffleCards.length > 0 && Math.random() > 0.4) {
+        console.log(`[Expert] ${player.name}: Mid game Shuffle after suspicious defuse.`);
+        return { type: 'PLAY_CARDS', cardIds: [shuffleCards[0].id] };
+      }
+
+      // 5e. SAVE Skip/Attack/Nope for critical moments. Just draw.
+      console.log(`[Expert] ${player.name}: Mid game conserving defense cards. Drawing.`);
+      return { type: 'DRAW_CARD' };
+    }
+
+    // ==========================================
+    // RULE 6: EARLY GAME (> 12 cards in deck)
+    // ==========================================
+    // Low bomb probability. Focus on resource accumulation.
+    console.log(`[Expert] ${player.name}: Early game (${deckSize} cards). Resource accumulation phase.`);
+
+    // 6a. Cat Card combos for free steals
+    if (target && target.handCount > 0) {
+      if (pairType && Math.random() > 0.3) {
+        console.log(`[Expert] ${player.name}: Early game pair steal from ${target.name}.`);
+        return { type: 'PLAY_CARDS', cardIds: counts[pairType].slice(0, 2), targetId: target.id };
+      }
+      if (tripletType && Math.random() > 0.3) {
+        // Early game: steal Defuse if we don't have one, otherwise steal Attack for defense stockpile
+        const requestedType = !hasDefuse ? CardType.DEFUSE : CardType.ATTACK;
+        const tripletTarget = !hasDefuse
+          ? (this.game.players.find(p => p.id !== botId && !p.isEliminated && p.hasDefuse() && p.handCount > 0) || target)
+          : target;
+        console.log(`[Expert] ${player.name}: Early game 3-of-a-kind for ${requestedType} from ${tripletTarget.name}.`);
+        return { type: 'PLAY_CARDS', cardIds: counts[tripletType].slice(0, 3), targetId: tripletTarget.id, requestedCardType: requestedType as any };
       }
     }
 
-    // Default action: Draw a card to end the turn and build the hand.
-    console.log(`[AIBot - Hard] Bot ${player.name} drawing card safely.`);
+    // 6b. Favor for resource building
+    if (favorCards.length > 0 && target && target.handCount > 0 && Math.random() > 0.5) {
+      const favorTarget = getBestFavorTarget() || target;
+      console.log(`[Expert] ${player.name}: Early game Favor on ${favorTarget.name}.`);
+      return { type: 'PLAY_CARDS', cardIds: [favorCards[0].id], targetId: favorTarget.id };
+    }
+
+    // 6c. DO NOT play Skip, Attack, Shuffle, See The Future in early game.
+    // These are lifesavers in late game. Conserve them absolutely.
+    console.log(`[Expert] ${player.name}: Early game safe draw. Stockpiling defense cards.`);
     return { type: 'DRAW_CARD' };
   }
 }

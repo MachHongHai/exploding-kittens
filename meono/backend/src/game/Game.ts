@@ -356,10 +356,13 @@ export class Game {
       if (orig.type === CardType.ATTACK) {
         const attackPrevIndex = this.currentPlayerIndex;
         const attackPrevTurns = this.players[this.currentPlayerIndex].turnsToPlay;
+        // Chained Attack stacking
+        const stackedTurns = this.players[this.currentPlayerIndex].turnsToPlay > 1
+          ? this.players[this.currentPlayerIndex].turnsToPlay + 2 : 2;
         this.players[this.currentPlayerIndex].turnsToPlay = 0;
         this.nextTurn();
         const nextPlayer = this.getCurrentPlayer();
-        nextPlayer.turnsToPlay = nextPlayer.turnsToPlay === 1 ? 2 : nextPlayer.turnsToPlay + 2;
+        nextPlayer.turnsToPlay = stackedTurns;
 
         this.lastNopeableAction = {
           type: 'ATTACK',
@@ -484,11 +487,14 @@ export class Game {
           const attackPrevIndex = this.currentPlayerIndex;
           const attackPrevTurns = player.turnsToPlay;
 
-          this.lastAction = `${player.name} played Attack!`;
+          // Chained Attack: if player was under attack (turnsToPlay > 1), stack remaining turns + 2
+          const stackedTurns = player.turnsToPlay > 1 ? player.turnsToPlay + 2 : 2;
+
+          this.lastAction = `${player.name} played Attack!${stackedTurns > 2 ? ` (Chained! ${stackedTurns} turns stacked!)` : ''}`;
           player.turnsToPlay = 0;
           this.nextTurn();
           const nextPlayer = this.getCurrentPlayer();
-          nextPlayer.turnsToPlay = nextPlayer.turnsToPlay === 1 ? 2 : nextPlayer.turnsToPlay + 2;
+          nextPlayer.turnsToPlay = stackedTurns;
 
           this.lastNopeableAction = {
             type: 'ATTACK',
