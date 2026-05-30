@@ -130,6 +130,25 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
     }
     
     const actionLower = action.toLowerCase();
+    
+    // Only trigger popups for the initial play or a direct reaction (Nope), not the resolution message.
+    // Resolution messages usually don't contain "played" or "NOPED".
+    const isInitialPlay = actionLower.includes('played') || action.includes('NOPED');
+
+    // Special handling for Kittens (always show popups regardless of "played" keyword)
+    if (actionLower.includes('kitten') || actionLower.includes('exploded') || actionLower.includes('eliminated')) {
+      if (actionLower.includes('eliminated') || actionLower.includes('exploded')) {
+        setActionPopup({ text: 'KABOOM!', color: 'from-red-700 via-red-950 to-black' });
+      } else if (actionLower.includes('imploding')) {
+        setActionPopup({ text: 'IMPLODING KITTEN!', color: 'from-rose-500 via-red-600 to-stone-800' });
+      } else if (actionLower.includes('exploding')) {
+        setActionPopup({ text: 'EXPLODING KITTEN!', color: 'from-orange-600 to-red-700' });
+      }
+      const timer = setTimeout(() => setActionPopup(null), 2000);
+      return () => clearTimeout(timer);
+    }
+
+    if (!isInitialPlay) return;
 
     if (action.includes('Targeted Attack') || actionLower.includes('targeted attack')) {
       setActionPopup({ text: 'TARGETED ATTACK!', color: 'from-red-600 via-orange-600 to-amber-600' });
@@ -141,27 +160,19 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
       setActionPopup({ text: 'ALTER THE FUTURE!', color: 'from-fuchsia-500 via-purple-600 to-indigo-700' });
     } else if (actionLower.includes('draw from the bottom')) {
       setActionPopup({ text: 'DRAW BOTTOM!', color: 'from-teal-400 via-emerald-500 to-cyan-600' });
-    } else if (actionLower.includes('reverse') || actionLower.includes('reversed the turn order')) {
+    } else if (actionLower.includes('reverse')) {
       setActionPopup({ text: 'REVERSE!', color: 'from-cyan-400 via-blue-500 to-indigo-600' });
-    } else if (actionLower.includes('imploding kitten')) {
-      if (actionLower.includes('eliminated') || actionLower.includes('exploded') || actionLower.includes('explode')) {
-        setActionPopup({ text: 'KABOOM!', color: 'from-red-700 via-red-950 to-black' });
-      } else {
-        setActionPopup({ text: 'IMPLODING KITTEN!', color: 'from-rose-500 via-red-600 to-stone-800' });
-      }
-    } else if (action.includes('targeted')) {
-      return; // Ignore other target selection updates (e.g. Favor confirmation)
     } else if (action.includes('played Shuffle')) {
       setActionPopup({ text: 'SHUFFLE!', color: 'from-orange-400 to-red-600' });
     } else if (action.includes('played Attack')) {
       setActionPopup({ text: 'ATTACK!', color: 'from-red-500 to-red-800' });
     } else if (action.includes('played Skip')) {
       setActionPopup({ text: 'SKIP!', color: 'from-blue-400 to-blue-700' });
-    } else if (action.includes('played See The Future') || action.includes('played See the Future')) {
+    } else if (actionLower.includes('see the future')) {
       setActionPopup({ text: 'SEE THE FUTURE!', color: 'from-fuchsia-400 to-purple-700' });
     } else if (action.includes('played Favor')) {
       setActionPopup({ text: 'FAVOR!', color: 'from-amber-600 to-orange-800' });
-    } else if (action.includes('played Nope') || action.includes('NOPED') || action.includes('Noped')) {
+    } else if (action.includes('played Nope') || action.includes('NOPED')) {
       setActionPopup({ text: 'NOPE!', color: 'from-red-600 to-stone-900' });
     } else {
       return;

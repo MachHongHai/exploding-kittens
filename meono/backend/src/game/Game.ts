@@ -244,8 +244,7 @@ export class Game {
       this.lastAction = `${player.name} played ${card.name}!`;
       const target = this.players.find(p => p.id === targetId);
       if (target) {
-        this.lastAction = `${player.name} played Favor!`;
-        this.lastAction = `${player.name} targeted ${target.name} for Favor!`;
+        this.lastAction = `${player.name} played ${card.name} on ${target.name}!`;
       }
       this.pendingAction = {
         actionId: generateCardId(),
@@ -286,8 +285,7 @@ export class Game {
       if (!target || target.handCount === 0) return { success: false, message: "Invalid target" };
 
       cards.forEach(c => player.removeCard(c.id) && this.discardPile.push(c));
-      this.lastAction = `${player.name} played a Pair!`;
-      this.lastAction = `${player.name} targeted ${target.name} for Pair!`;
+      this.lastAction = `${player.name} played a Pair on ${target.name}!`;
       this.pendingAction = {
         actionId: generateCardId(),
         playerId,
@@ -333,9 +331,8 @@ export class Game {
       if (idx === -1) return { success: false, message: `${target.name} has no ${requestedCardType}!` };
 
       cards.forEach(c => player.removeCard(c.id) && this.discardPile.push(c));
-      this.lastAction = `${player.name} played 3 of a Kind!`;
       const guessType = requestedCardType ? ` (${requestedCardType.replace(/_/g, ' ')})` : '';
-      this.lastAction = `${player.name} targeted ${target.name} for 3 of a Kind${guessType}!`;
+      this.lastAction = `${player.name} played 3 of a Kind on ${target.name}${guessType}!`;
       this.pendingAction = {
         actionId: generateCardId(),
         playerId,
@@ -667,7 +664,7 @@ export class Game {
               cardIds: action.cards.map(c => c.id),
               expiresAt: Date.now() + 12500
             };
-            this.lastAction = `${player.name} played Targeted Attack! Choose a target...`;
+            this.lastAction = `Select a target for ${player.name}'s Targeted Attack...`;
             // Don't resolve yet — wait for SELECT_TARGET
             return;
           }
