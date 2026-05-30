@@ -42,7 +42,7 @@ ADVANCED TACTICAL INSIGHTS & TRICKS:
    - Otherwise, target players with large hands or players holding a Defuse card.
 5. STRICT CONSERVATION OF DEFUSE & NOPE CARDS:
    - NEVER play DEFUSE or NOPE cards in a 2-card (Pair) or 3-card (Three of a Kind) combo under normal conditions. They are far too valuable as survival tools.
-   - EXCEPTION (DESPERATION MODE): If you are about to draw a known bomb, have NO Defuse card left to save you, and have NO individual escape cards (Skip/Attack/Shuffle) in hand, you may use any combo (including Defuses/Nopes) as a desperate attempt to steal an escape card from an opponent.
+   - EXCEPTION (DESPERATION MODE): If you are about to draw a known bomb (or if the draw pile has exactly 1 card left), have NO Defuse card left to save you, and have NO individual escape cards (Skip/Attack), you are in desperation. NOTE: If the draw pile has exactly 1 card left, NEVER play 'Shuffle' or 'See The Future' as single cards (they are completely useless). Instead, you MUST use any combination of cards (including pairs of Shuffles, pairs of See The Futures, or even Defuses/Nopes) as a Pair or 3-of-a-kind combo as a desperate attempt to steal an escape card from an opponent!
 6. SMART DEFUSING: If you draw a bomb, you must choose 'action': 'DEFUSE'.
    - Check the next player's status! If the next player HAS NO DEFUSE card, insert the bomb at index 0 (top of the deck) to eliminate them instantly.
    - If the next player HAS a Defuse card, insert the bomb deeper (e.g., index 2 or 3) to stall for time and keep yourself safe on your next turns.

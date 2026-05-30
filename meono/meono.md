@@ -49,7 +49,7 @@ Dự án được xây dựng dựa trên kiến trúc client-server hiện đ�
 - **Đôi (Pair):** Đánh 2 lá mèo giống nhau để trộm ngẫu nhiên 1 lá bài từ tay đối thủ.
 - **Bộ ba (Three of a Kind):** Đánh 3 lá mèo giống nhau để yêu cầu đích danh 1 loại bài từ đối thủ. Nếu đối thủ có lá bài đó, họ bắt buộc phải đưa cho bạn.
 - **Luật giữ bài khi đoán sai:** Trong Meono, nếu bạn đánh bộ ba và đoán sai (đối thủ không có lá bài yêu cầu), **hành động sẽ thất bại nhưng 3 lá bài mèo vẫn được giữ lại trên tay bạn** (không bị mất), bạn có thể thử yêu cầu lá khác hoặc chọn mục tiêu khác.
-- **Giới hạn nguyên liệu:** Chỉ sử dụng các lá Mèo thường (`CAT_CARD`) để làm combo. Chỉ trong các trường hợp cực kỳ tuyệt vọng (sắp nổ bom, không có Defuse và không còn lối thoát), hệ thống mới cho phép hiến tế các lá bài chức năng (như Skip, Attack, Shuffle...) làm combo.
+- **Giới hạn nguyên liệu:** Chỉ sử dụng các lá Mèo thường (`CAT_CARD`) để làm combo. Tuy nhiên, trong chế độ Tuyệt vọng (Desperation Mode) - khi sắp nổ bom hoặc **bộ bài rút chỉ còn đúng 1 lá** mà không có lối thoát, hệ thống cho phép hiến tế cả các lá chức năng (như Skip, Attack, Shuffle, See The Future...) để làm combo cướp bài. Đặc biệt ở tình huống 1 lá cuối cùng (chắc chắn là bom), AI sẽ không bao giờ đánh lẻ các lá `Shuffle` hoặc `See The Future` vì vô tác dụng, mà thay vào đó sẽ ghép chúng thành bộ đôi/bộ ba để cướp cơ hội sống sót từ đối thủ.
 
 ---
 

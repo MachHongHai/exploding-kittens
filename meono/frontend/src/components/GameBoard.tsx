@@ -16,9 +16,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
   const [targetPlayerId, setTargetPlayerId] = useState<string | null>(null);
   const [selectedCardIds, setSelectedCardIds] = useState<string[]>([]);
   const [showGuessModal, setShowGuessModal] = useState(false);
-  const showTargetModal = gameState.waitingForTarget && gameState.waitingForTarget.playerId === socketId
-    ? { type: gameState.waitingForTarget.type, cardIds: [] as string[] }
-    : null;
+  const [showTargetModal, setShowTargetModal] = useState<{ type: 'FAVOR' | '2-CARD' | '3-CARD'; cardIds: string[] } | null>(null);
 
 
   const [actionError, setActionError] = useState<string | null>(null);
@@ -27,7 +25,32 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
   const [isPawDrawing, setIsPawDrawing] = useState(false);
   const [eliminatedPlayerId, setEliminatedPlayerId] = useState<string | null>(null);
   const [showDefuseSuccess, setShowDefuseSuccess] = useState(false);
-  const [comboEffect, setComboEffect] = useState<{ type: string; count: number } | null>(null);
+  // Handle delayed target modal
+  useEffect(() => {
+    let timer: NodeJS.Timeout;
+    if (gameState.waitingForTarget && gameState.waitingForTarget.playerId === socketId) {
+      const action = gameState.lastAction || '';
+      const justPlayedCombo = action.includes('played a Pair!') || action.includes('played 3 of a Kind!');
+      const justPlayedFavor = action.includes('played Favor!');
+
+      if (justPlayedCombo && !showTargetModal) {
+        timer = setTimeout(() => {
+          setShowTargetModal({ type: gameState.waitingForTarget!.type, cardIds: [] });
+        }, 2500);
+      } else if (justPlayedFavor && !showTargetModal) {
+        timer = setTimeout(() => {
+          setShowTargetModal({ type: gameState.waitingForTarget!.type, cardIds: [] });
+        }, 2000);
+      } else {
+        setShowTargetModal({ type: gameState.waitingForTarget.type, cardIds: [] });
+      }
+    } else {
+      setShowTargetModal(null);
+    }
+    return () => clearTimeout(timer);
+  }, [gameState.waitingForTarget, gameState.lastAction]);
+
+  const [comboEffect, setComboEffect] = useState<{ type: 'pair' | 'triple', count: number } | null>(null);
   const [actionPopup, setActionPopup] = useState<{ text: string; color: string } | null>(null);
 
   // Kitten Chance states
@@ -93,9 +116,16 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
     }
   }, [gameState.lastAction]);
 
-  // Watch for action cards played to show big text popup
+  // Watch for action cards played to show big text   // Action popups
   useEffect(() => {
     const action = gameState.lastAction || '';
+    if (!action) {
+      setActionPopup(null);
+      return;
+    }
+    
+    if (action.includes('targeted')) return; // Ignore target selection updates
+
     if (action.includes('played Shuffle')) {
       setActionPopup({ text: 'SHUFFLE!', color: 'from-orange-400 to-red-600' });
     } else if (action.includes('played Attack')) {
@@ -104,7 +134,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
       setActionPopup({ text: 'SKIP!', color: 'from-blue-400 to-blue-700' });
     } else if (action.includes('played See The Future')) {
       setActionPopup({ text: 'SEE THE FUTURE!', color: 'from-fuchsia-400 to-purple-700' });
-    } else if (action.includes('played Favor') || action.includes('for Favor!')) {
+    } else if (action.includes('played Favor')) {
       setActionPopup({ text: 'FAVOR!', color: 'from-amber-600 to-orange-800' });
     } else if (action.includes('played Nope') || action.includes('NOPED')) {
       setActionPopup({ text: 'NOPE!', color: 'from-red-600 to-stone-900' });
@@ -149,6 +179,11 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
       return;
     }
     
+    // Ignore target selection updates
+    if (action.includes('targeted')) {
+      return;
+    }
+    
     if (action.includes('Pair') || action.includes('pair') || action.includes('2 of')) {
       setComboEffect({ type: 'pair', count: 2 });
     } else if (action.includes('Three') || action.includes('three') || action.includes('3 of')) {
@@ -179,13 +214,28 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
   const [showYourTurn, setShowYourTurn] = useState(false);
 
   useEffect(() => {
+    let showTimer: NodeJS.Timeout;
+    let hideTimer: NodeJS.Timeout;
+
     if (isMyTurn) {
-      setShowYourTurn(true);
-      const timer = setTimeout(() => setShowYourTurn(false), 2000);
-      return () => clearTimeout(timer);
+      const justDefused = gameState.lastAction?.includes('defused') || gameState.lastAction?.includes('Defuse');
+      
+      if (justDefused && !gameState.waitingForDefuse) {
+        showTimer = setTimeout(() => {
+          setShowYourTurn(true);
+          hideTimer = setTimeout(() => setShowYourTurn(false), 2000);
+        }, 3000);
+      } else {
+        setShowYourTurn(true);
+        hideTimer = setTimeout(() => setShowYourTurn(false), 2000);
+      }
     } else {
       setShowYourTurn(false);
     }
+    return () => {
+      clearTimeout(showTimer);
+      clearTimeout(hideTimer);
+    };
   }, [isMyTurn]);
 
 
@@ -1559,58 +1609,51 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
 
       {/* Action Window Overlay */}
 
-      {/* Target Selection Instruction Banner */}
+      {/* Target Selection Dramatic Text */}
       <AnimatePresence>
         {showTargetModal && (
           <motion.div
-            key="target-selection-banner"
-            initial={{ opacity: 0, y: -50, scale: 0.95 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -50, scale: 0.95 }}
-            transition={{ type: 'spring', stiffness: 120, damping: 14 }}
-            className={`absolute top-24 left-1/2 -translate-x-1/2 z-30 w-[90%] max-w-md border backdrop-blur-xl px-6 py-4 rounded-3xl flex flex-col items-center gap-3 shadow-lg pointer-events-auto text-center ${
-              showTargetModal.type === 'FAVOR'
-                ? 'bg-purple-950/80 border-purple-500/40 shadow-purple-500/30'
-                : showTargetModal.type === '2-CARD'
-                  ? 'bg-orange-950/80 border-orange-500/40 shadow-orange-500/30'
-                  : 'bg-fuchsia-950/80 border-fuchsia-500/40 shadow-fuchsia-500/30'
-            }`}
+            key="target-selection-text"
+            initial={{ scale: 0, opacity: 0, rotate: -5 }}
+            animate={{ scale: [1.2, 0.9, 1], opacity: 1, rotate: [5, -2, 0] }}
+            exit={{ scale: 1.5, opacity: 0, filter: "blur(10px)" }}
+            transition={{ type: 'spring', stiffness: 300, damping: 15 }}
+            className="absolute top-[30%] left-0 w-full z-[45] pointer-events-none flex flex-col items-center justify-center"
           >
-            {/* Themed icon/indicator */}
-            <div className="flex items-center gap-2">
-              <span className="text-xl animate-bounce">
-                {showTargetModal.type === 'FAVOR' ? '🤝' : showTargetModal.type === '2-CARD' ? '🔥' : '🔮'}
-              </span>
-              <h4 className={`font-cartoon text-sm uppercase tracking-widest font-black ${
+            <h1 
+              className={`relative text-5xl md:text-7xl font-cartoon text-transparent bg-clip-text uppercase tracking-tighter text-center leading-none z-10 ${
                 showTargetModal.type === 'FAVOR'
-                  ? 'text-purple-300'
+                  ? 'bg-gradient-to-b from-purple-300 via-purple-500 to-fuchsia-700'
                   : showTargetModal.type === '2-CARD'
-                    ? 'text-orange-300'
-                    : 'text-fuchsia-300'
-              }`}>
-                {showTargetModal.type === 'FAVOR'
-                  ? 'Choose Favor Target'
+                    ? 'bg-gradient-to-b from-orange-300 via-orange-500 to-red-700'
+                    : 'bg-gradient-to-b from-fuchsia-300 via-pink-500 to-rose-700'
+              }`}
+              style={{
+                WebkitTextStroke: "4px black",
+                filter: `drop-shadow(4px 6px 0px rgba(0,0,0,0.8)) drop-shadow(0px 0px 30px ${
+                  showTargetModal.type === 'FAVOR' ? 'rgba(168,85,247,0.6)' 
+                  : showTargetModal.type === '2-CARD' ? 'rgba(249,115,22,0.6)' 
+                  : 'rgba(217,70,239,0.6)'
+                })`,
+              }}
+            >
+              {showTargetModal.type === 'FAVOR'
+                  ? 'CHOOSE TARGET!'
                   : showTargetModal.type === '2-CARD'
-                    ? 'Choose Steal Target'
-                    : 'Choose Guess Target'}
-              </h4>
-            </div>
-
-            {opponents.filter(o => !o.isEliminated && o.handCount > 0).length === 0 ? (
-              <p className="text-xs font-cartoon text-red-400 tracking-wide uppercase animate-pulse">
-                ⚠️ No valid targets available (opponents have no cards)!
-              </p>
-            ) : (
-              <p className="text-xs font-cartoon text-slate-200 tracking-wide uppercase">
-                {showTargetModal.type === 'FAVOR'
-                  ? "Tap a player's avatar above to request a Favor!"
-                  : showTargetModal.type === '2-CARD'
-                    ? "Tap a player's avatar above to steal a card!"
-                    : "Tap a player's avatar above to play 3-of-a-Kind guess!"}
-              </p>
-            )}
-
-
+                    ? 'STEAL FROM WHO?'
+                    : 'CHOOSE A VICTIM!'}
+            </h1>
+            
+            <motion.p 
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.3 }}
+              className="text-sm md:text-lg font-cartoon text-white uppercase tracking-widest mt-4 bg-black/60 px-6 py-2 rounded-full border border-white/20 shadow-xl"
+            >
+              {opponents.filter(o => !o.isEliminated && o.handCount > 0).length === 0 
+                ? '⚠️ No valid targets available!' 
+                : "Tap an opponent's avatar above"}
+            </motion.p>
           </motion.div>
         )}
       </AnimatePresence>

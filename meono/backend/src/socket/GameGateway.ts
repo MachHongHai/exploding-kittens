@@ -167,7 +167,7 @@ export class GameGateway {
     this.countdownIntervals.set(playerId, interval);
   }
 
-  private checkStateTimers() {
+  private checkStateTimers(delayExtra: number = 0) {
     if (this.game.status !== 'PLAYING') return;
 
     if (this.game.waitingForSteal && !this.stealTimer) {
@@ -187,7 +187,7 @@ export class GameGateway {
     const hasActiveInteraction = this.game.pendingAction || this.game.waitingForTarget || this.game.waitingForSteal || this.game.waitingForFavor || this.game.waitingForDefuse || this.game.playerSeeingFuture !== null;
     
     if (!hasActiveInteraction && !this.turnTimer) {
-      this.startTurnTimer();
+      this.startTurnTimer(delayExtra);
     } else if (hasActiveInteraction && this.turnTimer) {
       clearTimeout(this.turnTimer);
       this.turnTimer = null;
@@ -236,21 +236,22 @@ export class GameGateway {
     }, 10000);
   }
 
-  private startTurnTimer() {
+  private startTurnTimer(delayExtra: number = 0) {
     if (this.turnTimer) clearTimeout(this.turnTimer);
-    this.game.turnExpiresAt = Date.now() + 15000;
+    this.game.turnExpiresAt = Date.now() + 15000 + delayExtra;
     this.turnTimer = setTimeout(async () => {
       const currentPlayer = this.game.getCurrentPlayer();
       if (currentPlayer && this.game.status === 'PLAYING' && !this.game.pendingAction && !this.game.waitingForDefuse && !this.game.waitingForSteal && !this.game.waitingForFavor && !this.game.waitingForTarget) {
         console.log(`[GameGateway] Turn timed out for ${currentPlayer.name}`);
         await this.processAction(currentPlayer.id, { type: 'DRAW_CARD' });
       }
-    }, 15000);
+    }, 15000 + delayExtra);
   }
 
   private async processAction(playerId: string, action: PlayerAction) {
     let result: 'SAFE' | 'EXPLODED' | 'DEFUSE_REQUIRED' = 'SAFE';
     let actionResult: { success: boolean; message?: string } = { success: true, message: '' };
+    let delayExtra = 0;
 
     if (action.type === 'DRAW_CARD') {
       if (this.game.pendingAction) return { success: false, message: "Wait for action to resolve!" };
@@ -312,6 +313,7 @@ export class GameGateway {
       if (success) {
         this.clearTimersForPlayer(playerId);
         this.game.bombCountdown = undefined;
+        delayExtra = 3000;
       } else {
         return { success: false, message: "Invalid defuse action" };
       }
@@ -325,10 +327,10 @@ export class GameGateway {
            this.turnTimer = null;
         }
         if (this.game.status === 'PLAYING') {
-           this.game.turnExpiresAt = Date.now() + 15000;
+           this.game.turnExpiresAt = Date.now() + 15000 + delayExtra;
         }
       }
-      this.checkStateTimers();
+      this.checkStateTimers(delayExtra);
     }
 
     this.broadcastState();
@@ -428,7 +430,7 @@ export class GameGateway {
     this.broadcastState();
     this.targetTimer = setTimeout(() => {
       this.resolveTargetTimeout(playerId);
-    }, 10000);
+    }, 12500);
   }
 
   private resolveTargetTimeout(playerId: string) {

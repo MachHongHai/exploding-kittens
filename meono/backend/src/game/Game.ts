@@ -207,7 +207,7 @@ export class Game {
           type: 'FAVOR',
           playerId,
           cardIds,
-          expiresAt: Date.now() + 10000
+          expiresAt: Date.now() + 12500
         };
         return { success: true };
       }
@@ -241,7 +241,7 @@ export class Game {
           type: '2-CARD',
           playerId,
           cardIds,
-          expiresAt: Date.now() + 10000
+          expiresAt: Date.now() + 12500
         };
         return { success: true };
       }
@@ -273,7 +273,7 @@ export class Game {
           type: '3-CARD',
           playerId,
           cardIds,
-          expiresAt: Date.now() + 10000
+          expiresAt: Date.now() + 12500
         };
         return { success: true };
       }
