@@ -13,6 +13,8 @@ export class GameGateway {
   private bombTimers: Map<string, NodeJS.Timeout> = new Map();
   private nopeTimer: NodeJS.Timeout | null = null;
   private targetTimer: NodeJS.Timeout | null = null;
+  private botTurnTimer: NodeJS.Timeout | null = null;
+  private botFavorTimer: NodeJS.Timeout | null = null;
   private stealTimer: NodeJS.Timeout | null = null;
   private favorTimer: NodeJS.Timeout | null = null;
   private turnTimer: NodeJS.Timeout | null = null;
@@ -373,9 +375,13 @@ export class GameGateway {
 
     const requiresDefuse = this.game.waitingForDefuse === currentPlayer.id;
 
+    // Clear any existing timer to prevent multiple overlapping bot turns
+    if (this.botTurnTimer) clearTimeout(this.botTurnTimer);
+
     // Increased thinking delay to 5 seconds for a more relaxed pace
     const delay = 5000; 
-    setTimeout(async () => {
+    this.botTurnTimer = setTimeout(async () => {
+      this.botTurnTimer = null;
       // Re-verify it's still their turn and the game is active
       const activePlayer = this.game.getCurrentPlayer();
       if (!activePlayer || activePlayer.id !== currentPlayer.id || this.game.status !== 'PLAYING') return;
@@ -400,8 +406,10 @@ export class GameGateway {
       const victimId = this.game.waitingForFavor.victimId;
       const victim = this.game.players.find(p => p.id === victimId);
       if (victim && victim.isBot) {
+        if (this.botFavorTimer) clearTimeout(this.botFavorTimer);
         const delay = 1500; // 1.5 seconds response delay for the bot
-        setTimeout(async () => {
+        this.botFavorTimer = setTimeout(async () => {
+          this.botFavorTimer = null;
           if (this.game.waitingForFavor && this.game.waitingForFavor.victimId === victimId) {
             try {
               const action = await this.botController.takeTurn(victimId, this.botDifficulty);

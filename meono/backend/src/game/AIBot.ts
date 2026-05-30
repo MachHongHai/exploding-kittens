@@ -381,9 +381,11 @@ export class AIBotController {
       
       const remainingDrawsAfterDefuse = player.turnsToPlay - 1;
       if (remainingDrawsAfterDefuse > 0) {
-        // Safe placement: beyond remaining draws
-        const safeDepth = Math.min(remainingDrawsAfterDefuse + 1, this.game.drawPile.length);
-        console.log(`[AIBot - Medium] Under attack with ${remainingDrawsAfterDefuse} draws left. Placing bomb at safe depth ${safeDepth} to avoid self-draw.`);
+        const neededDepth = remainingDrawsAfterDefuse + 1;
+        const maxDepth = this.game.drawPile.length;
+        // Place bomb past our remaining draws, or at bottom if deck is too small
+        const safeDepth = Math.min(neededDepth, maxDepth);
+        console.log(`[AIBot - Medium] Under attack with ${remainingDrawsAfterDefuse} draws left. Placing bomb at depth ${safeDepth} (deck: ${maxDepth}).`);
         return { type: 'DEFUSE', insertIndex: safeDepth };
       }
 
@@ -409,7 +411,7 @@ export class AIBotController {
     const lastDefuse = (this.game as any).lastDefuseAction;
     const isBombSuspected = lastDefuse && lastDefuse.playerId !== botId && lastDefuse.drawsSinceDefuse === 0;
 
-    const isTopCardSafe = player.knownDeckTop.length > 0 && player.knownDeckTop[0].cardType !== CardType.EXPLODING_KITTEN;
+    const isTopCardSafe = player.knownDeckTop.length > 0 && player.knownDeckTop[0].cardType !== CardType.EXPLODING_KITTEN && player.knownDeckTop[0].cardType !== 'UNKNOWN';
     const isBombDanger = (isBombKnown || isBombSuspected) && !isTopCardSafe;
 
     const skipOrAttack = player.hand.find(c => c.type === CardType.SKIP || c.type === CardType.ATTACK);
@@ -916,12 +918,23 @@ ${historyDesc}
       // After defusing, turnsToPlay is decremented by 1.
       // If we still have more draws left, we MUST place the bomb deep enough to not draw it again ourselves.
       const remainingDrawsAfterDefuse = player.turnsToPlay - 1;
+      console.log(`[Expert DEFUSE DEBUG] ${player.name}: turnsToPlay=${player.turnsToPlay}, remainingDrawsAfterDefuse=${remainingDrawsAfterDefuse}, drawPile.length=${this.game.drawPile.length}, hasDefuse=${hasDefuse}`);
 
       if (remainingDrawsAfterDefuse > 0) {
-        // We're under Attack and still have draws remaining. Place bomb PAST our remaining draws.
-        const safeDepth = Math.min(remainingDrawsAfterDefuse + 1, this.game.drawPile.length);
-        console.log(`[Expert] ${player.name}: Under attack with ${remainingDrawsAfterDefuse} draws left. Placing bomb at depth ${safeDepth} to avoid self-draw.`);
-        return { type: 'DEFUSE', insertIndex: safeDepth };
+        const neededDepth = remainingDrawsAfterDefuse + 1; // must be PAST all our remaining draws
+        const maxDepth = this.game.drawPile.length; // max insert position
+
+        if (neededDepth <= maxDepth) {
+          // Deck is large enough - place bomb safely past our remaining draws
+          console.log(`[Expert] ${player.name}: Under attack with ${remainingDrawsAfterDefuse} draws left. Placing bomb at safe depth ${neededDepth} (deck has ${maxDepth} cards).`);
+          return { type: 'DEFUSE', insertIndex: neededDepth };
+        } else {
+          // CRITICAL: Deck is too small! No matter where we put the bomb, we'll draw it again.
+          // Place it at the very bottom (deepest possible) to give ourselves the most draws before hitting it.
+          // We'll need to play escape cards (Attack/Skip/Shuffle) on subsequent turns to survive.
+          console.log(`[Expert] ${player.name}: DANGER! Deck too small (${maxDepth}) for ${remainingDrawsAfterDefuse} remaining draws. Placing bomb at bottom (depth ${maxDepth}).`);
+          return { type: 'DEFUSE', insertIndex: maxDepth };
+        }
       }
 
       // This is our last draw. Next player will draw after us.
@@ -949,10 +962,13 @@ ${historyDesc}
     // PHASE 1: INTELLIGENCE GATHERING
     // ==========================================
     // Bomb knowledge from See The Future memory
+    // IMPORTANT: 'UNKNOWN' entries in knownDeckTop are padding (we DON'T know what's there).
+    // Only cards positively identified via See The Future count as "known safe".
     const isBombOnTop = player.knownDeckTop.length > 0 &&
                         player.knownDeckTop[0].cardType === CardType.EXPLODING_KITTEN;
     const isTopCardSafe = player.knownDeckTop.length > 0 &&
-                          player.knownDeckTop[0].cardType !== CardType.EXPLODING_KITTEN;
+                          player.knownDeckTop[0].cardType !== CardType.EXPLODING_KITTEN &&
+                          player.knownDeckTop[0].cardType !== 'UNKNOWN';
     const bombInDrawRange = player.knownDeckTop.findIndex((c: any, idx: number) =>
       c.cardType === CardType.EXPLODING_KITTEN && idx < player.turnsToPlay
     ) !== -1;
@@ -1034,18 +1050,23 @@ ${historyDesc}
         console.log(`[Expert] ${player.name}: Using Skip to reduce attack pressure (${player.turnsToPlay} → ${player.turnsToPlay - 1} turns).`);
         return { type: 'PLAY_CARDS', cardIds: [skipCards[0].id] };
       }
-      // 1c. Scout before forced draw or shuffle
+      // 1c. Shuffle if we KNOW bomb is in our draw range (e.g. we just placed it but deck was too small)
+      if (bombInDrawRange && shuffleCards.length > 0) {
+        console.log(`[Expert] ${player.name}: Bomb in draw range under attack! Shuffling to randomize.`);
+        return { type: 'PLAY_CARDS', cardIds: [shuffleCards[0].id] };
+      }
+      // 1d. Scout before forced draw
       if (seeFutureCards.length > 0 && player.knownDeckTop.length === 0) {
         console.log(`[Expert] ${player.name}: Scouting deck before forced draw under attack.`);
         return { type: 'PLAY_CARDS', cardIds: [seeFutureCards[0].id] };
       }
-      // 1d. Shuffle if bomb known or strongly suspected
+      // 1e. Shuffle if bomb known or strongly suspected (after scouting)
       if (isDangerZone && shuffleCards.length > 0) {
         console.log(`[Expert] ${player.name}: Shuffling deck under attack with bomb danger.`);
         return { type: 'PLAY_CARDS', cardIds: [shuffleCards[0].id] };
       }
       
-      // 1e. DESPERATION: No escape cards. Try Combos/Favor before drawing!
+      // 1f. DESPERATION: No escape cards. Try Combos/Favor before drawing!
       if (isDangerZone && target && target.handCount > 0) {
         if (tripletType) {
           const preferred = !hasDefuse ? CardType.DEFUSE : CardType.ATTACK;
@@ -1064,7 +1085,7 @@ ${historyDesc}
         }
       }
 
-      // 1f. No escape available - must draw
+      // 1g. No escape available - must draw
       console.log(`[Expert] ${player.name}: No escape cards under attack. Drawing.`);
       return this.getLastResortAction(botId) || { type: 'DRAW_CARD' };
     }

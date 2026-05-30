@@ -92,15 +92,32 @@ Khi Bot phải đặt bom sau khi tháo ngòi:
 - Nếu nạn nhân tiếp theo không có `Defuse`, Bot đặt bom ngay ở vị trí `0` (trên cùng) để hạ gục đối thủ lập tức.
 - Nếu đối phương có `Defuse`, Bot đặt ngẫu nhiên ở độ sâu từ `1` đến `3` để ép đối thủ tiêu tốn tài nguyên gỡ bom ở các vòng sau.
 
+### 4.7. Khắc phục lỗi tự chặn (Self-Nope Prevention)
+- **Sửa lỗi logic:** Khắc phục triệt để lỗi AI tự đánh lá `Nope` để phủ quyết hành động chức năng của chính mình (ví dụ: tự `Nope` lá `Skip` hoặc `Attack` do chính mình vừa đánh).
+
 ---
 
 ## 5. THIẾT KẾ GIAO DIỆN & TRẢI NGHIỆM CHIẾN GAME (UI/UX)
 
-Giao diện của Meono được thiết kế để mang lại cảm giác của một trò chơi thẻ bài kỹ thuật số cao cấp và sống động:
+Giao diện của Meono được thiết kế để mang lại cảm giác của một trò chơi thẻ bài kỹ thuật số cao cấp, sống động và mượt mà:
 
-- **Cute Kitten Avatars:** Thay thế các vòng tròn hình học đơn điệu bằng bộ avatar mèo hoạt họa cực kỳ đáng yêu. Màu sắc và biểu cảm của các avatar thay đổi theo vị trí người chơi và trạng thái hành động.
-- **Arcade Nope Button:** Nút phản hồi Nope được thiết kế như một nút bấm khẩn cấp 3D của máy game thùng, tự động phát sáng neon đỏ rực và rung lắc mạnh mẽ khi đến thời gian cửa sổ Nope mở ra, kích thích phản xạ của người chơi.
-- **High-tech Defusal Kit:** Giao diện đặt bom khi tháo ngòi mô phỏng một thiết bị gỡ bom công nghệ cao với font chữ LCD, nền quét scanline cổ điển, nút bấm neon và thanh trượt trực quan.
-- **Scroll of Acts:** Lịch sử trò chơi được trình bày dưới dạng một cuộn thư cổ điển tự động cuộn, ghi lại chi tiết mọi hành động kèm Emoji biểu cảm sinh động, giúp người chơi dễ dàng theo dõi diễn biến trận đấu.
-- **Holographic Cards & 3D Tilt:** Các lá bài quan trọng (Defuse, Exploding Kitten) có lớp phủ gradient hào quang (holographic sheen). Khi rê chuột lên các lá bài trên tay, chúng sẽ nghiêng theo góc nhìn 3D vật lý chân thực.
-- **Action Window Delay:** Cửa sổ đếm ngược Nope kéo dài 5 giây giúp cuộc chơi mượt mà, kết hợp với thời gian delay thông minh của Bot để người chơi có thể phản ứng kịp thời.
+- **Avatar Mèo Hoạt Họa (Cute Kitten Avatars):** Thay thế các vòng tròn hình học đơn điệu bằng bộ avatar mèo hoạt họa cực kỳ đáng yêu. Màu sắc và biểu cảm của các avatar thay đổi theo vị trí người chơi và trạng thái hành động.
+- **Nút Nope Động & Thông Minh (Intelligent Nope Button):**
+  - Thiết kế như một nút bấm khẩn cấp 3D của máy game thùng, tự động phát sáng neon đỏ rực và rung lắc mạnh mẽ khi đến thời gian cửa sổ Nope mở ra.
+  - **Tối ưu hóa logic:** Nút Nope chỉ phát sáng khi có hành động hợp lệ từ đối thủ có thể bị Nope. Nút sẽ không sáng khi người chơi tự đánh bài hoặc khi đối thủ dùng lá `Defuse` để tháo bom. Người chơi vẫn có thể di chuột tương tác (hover) với nút Nope bất cứ lúc nào để tăng cảm giác phản hồi trực quan.
+- **Giao Diện Gỡ Bom LCD (High-tech Defusal Kit):** Giao diện đặt bom khi tháo ngòi mô phỏng một thiết bị gỡ bom công nghệ cao với font chữ LCD, nền quét scanline cổ điển, nút bấm neon và thanh trượt trực quan.
+- **Bảng Nhật Ký Cổ Điển (Scroll of Acts):** Lịch sử trò chơi được trình bày dưới dạng một cuộn thư cổ điển tự động cuộn, ghi lại chi tiết mọi hành động kèm Emoji biểu cảm sinh động. Đã loại bỏ dòng tiêu đề "Scroll of Acts" cứng nhắc để cuộn thư hòa hợp tự nhiên vào bàn gỗ.
+- **Thẻ Bài Nghiêng 3D & Holographic:** Các lá bài quan trọng (Defuse, Exploding Kitten) có lớp phủ gradient hào quang (holographic sheen). Khi rê chuột lên các lá bài trên tay, chúng sẽ nghiêng theo góc nhìn 3D vật lý chân thực.
+- **Luôn Luôn Tương Tác (Always-Interactive Hand):** Cho phép người chơi di chuột, xem thông tin và chọn bài kể cả khi chưa tới lượt hoặc trong khoảng nghỉ khi các Bot đang thực hiện hành động, loại bỏ cảm giác giao diện bị đơ/khóa.
+- **Hiệu Ứng Báo Lượt "YOUR TURN":** Thay thế dòng chữ tĩnh bằng một biểu ngữ hoạt họa "YOUR TURN" phóng to giữa màn hình rồi biến mất nhanh chóng giống như đếm ngược, giúp người chơi tập trung và đẩy nhanh nhịp độ trận đấu.
+- **Bố Trí Bàn Chơi Cân Đối (Optimized Layout):**
+  - **Hand bài:** Được đẩy cao lên một chút để không bị che khuất phần dưới của lá bài.
+  - **Xấp bài rút và xấp bài bỏ (Discard Pile):** Tăng kích thước hiển thị lớn hơn, dịch chuyển xuống dưới một chút để tạo khoảng cách thoáng đãng với các avatar đối thủ ở phía trên.
+  - **Xấp bài bỏ tối giản:** Loại bỏ khung viền dashed và dòng chữ "Empty" khi xấp bài bỏ trống để nó hòa vào nền gỗ tự nhiên. Các lá bài bỏ sẽ xếp chồng chéo lên nhau ngẫu nhiên khi trận đấu diễn ra.
+- **Tinh Chỉnh Nút Play:**
+  - Ẩn số lượng đếm lá bài chọn phía sau chữ Play (chỉ hiển thị "Play" thay vì "Play (1)", "Play (2)").
+  - Di chuyển vị trí nút Play cao lên một chút (`-top-14`) để không bị các lá bài đang chọn nảy lên đè khuất khi nhấp vào chúng.
+- **Cải Thiện Độ Mượt & Thao Tác Nhanh (Rapid Interaction Fixes):**
+  - Tăng tốc độ phản hồi chung của trò chơi giúp các bot đánh bài nhanh và dứt khoát hơn.
+  - Loại bỏ các cảnh báo lỗi đỏ khó chịu ("An action is waiting for Nope...") khi người chơi click chuột nhanh liên tục.
+  - Sửa lỗi kẹt hoạt ảnh (như chữ "YOUR TURN" hoặc hiệu ứng "Shuffle" bị treo cứng trên màn hình khi người chơi thao tác cực nhanh) bằng cách bổ sung dọn dẹp (cleanup) và thiết lập lại trạng thái (reset state) trong React Effects.

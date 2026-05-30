@@ -27,6 +27,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
   const [eliminatedPlayerId, setEliminatedPlayerId] = useState<string | null>(null);
   const [showDefuseSuccess, setShowDefuseSuccess] = useState(false);
   const [comboEffect, setComboEffect] = useState<{ type: string; count: number } | null>(null);
+  const [actionPopup, setActionPopup] = useState<{ text: string; color: string } | null>(null);
 
   // Kitten Chance states
   const totalCards = gameState.drawPileCount;
@@ -73,15 +74,37 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
     }
   }, [kittenPercent, prevKittenPercent]);
   
-  // Watch for shuffle action
+  // Watch for shuffle animation (ONLY when resolved)
   useEffect(() => {
-    if (gameState.lastAction?.includes("played Shuffle")) {
+    if (gameState.lastAction === "Deck shuffled.") {
       setIsShuffling(true);
       const timer = setTimeout(() => setIsShuffling(false), 2000);
       return () => clearTimeout(timer);
     } else {
       setIsShuffling(false);
     }
+  }, [gameState.lastAction]);
+
+  // Watch for action cards played to show big text popup
+  useEffect(() => {
+    const action = gameState.lastAction || '';
+    if (action.includes('played Shuffle')) {
+      setActionPopup({ text: 'SHUFFLE!', color: 'from-orange-400 to-red-600' });
+    } else if (action.includes('played Attack')) {
+      setActionPopup({ text: 'ATTACK!', color: 'from-red-500 to-red-800' });
+    } else if (action.includes('played Skip')) {
+      setActionPopup({ text: 'SKIP!', color: 'from-blue-400 to-blue-700' });
+    } else if (action.includes('played See The Future')) {
+      setActionPopup({ text: 'SEE THE FUTURE!', color: 'from-fuchsia-400 to-purple-700' });
+    } else if (action.includes('played Favor') || action.includes('for Favor!')) {
+      setActionPopup({ text: 'FAVOR!', color: 'from-amber-600 to-orange-800' });
+    } else if (action.includes('played Nope') || action.includes('NOPED')) {
+      setActionPopup({ text: 'NOPE!', color: 'from-red-600 to-stone-900' });
+    } else {
+      return;
+    }
+    const timer = setTimeout(() => setActionPopup(null), 2000);
+    return () => clearTimeout(timer);
   }, [gameState.lastAction]);
 
   // Watch for player elimination
@@ -112,6 +135,12 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
   // Watch for combo plays
   useEffect(() => {
     const action = gameState.lastAction || '';
+    // If the action is a Nope, do not trigger combo effect even if it mentions the combo name
+    if (action.includes('NOPED') || action.includes('Nope') || action.includes('noped')) {
+      setComboEffect(null);
+      return;
+    }
+    
     if (action.includes('Pair') || action.includes('pair') || action.includes('2 of')) {
       setComboEffect({ type: 'pair', count: 2 });
     } else if (action.includes('Three') || action.includes('three') || action.includes('3 of')) {
@@ -1053,25 +1082,6 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
                       </motion.div>
                     );
                   })}
-                  {/* Shuffle text overlay */}
-                  <motion.div
-                    key="shuffle-text"
-                    initial={{ opacity: 0, scale: 0.5 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    exit={{ opacity: 0, scale: 0.5 }}
-                    className="absolute -top-14 left-1/2 -translate-x-1/2 z-30 pointer-events-none"
-                  >
-                    <div className="flex items-center gap-2 bg-black/80 backdrop-blur-md border border-orange-500/40 px-4 py-2 rounded-full shadow-[0_0_30px_rgba(249,115,22,0.4)]">
-                      <motion.span 
-                        className="text-lg"
-                        animate={{ rotate: 360 }}
-                        transition={{ duration: 0.8, repeat: Infinity, ease: 'linear' }}
-                      >
-                        🔀
-                      </motion.span>
-                      <span className="font-cartoon text-orange-400 uppercase tracking-widest text-xs">Shuffling...</span>
-                    </div>
-                  </motion.div>
                 </>
               )}
             </AnimatePresence>
@@ -1176,26 +1186,11 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
             >
               {actionHistory.slice(-10).map((act, index, arr) => {
                 const isNewest = index === arr.length - 1;
-                // Determine emoji based on action content
-                let emoji = '•';
-                if (act.includes('Attack')) emoji = '⚔️';
-                else if (act.includes('Skip')) emoji = '⏭️';
-                else if (act.includes('Shuffle')) emoji = '🔀';
-                else if (act.includes('See The Future')) emoji = '🔮';
-                else if (act.includes('Favor')) emoji = '🤝';
-                else if (act.includes('NOPE')) emoji = '🚫';
-                else if (act.includes('Nope')) emoji = '🚫';
-                else if (act.includes('drew')) emoji = '🃏';
-                else if (act.includes('explod')) emoji = '💥';
-                else if (act.includes('defuse')) emoji = '🛡️';
-                else if (act.includes('Defuse')) emoji = '🛡️';
-                else if (act.includes('stole') || act.includes('Pair') || act.includes('Three')) emoji = '🐱';
-                else if (act.includes('gave') || act.includes('picked')) emoji = '🔄';
 
                 return (
                   <div 
                     key={`${actionHistory.length}-${index}`}
-                    className={`font-parchment text-[10px] leading-snug px-1.5 py-[2px] rounded transition-all ${
+                    className={`font-parchment text-[10px] leading-snug px-2 py-1 rounded transition-all ${
                       isNewest 
                         ? 'text-stone-900 font-bold bg-amber-200/50 border-l-2 border-amber-600' 
                         : index >= arr.length - 3
@@ -1203,7 +1198,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
                           : 'text-stone-500'
                     }`}
                   >
-                    <span className="mr-0.5 text-[9px]">{emoji}</span> {act}
+                    {act}
                   </div>
                 );
               })}
@@ -1498,46 +1493,48 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
         {gameState.waitingForDefuse && gameState.waitingForDefuse !== socketId && (
           <motion.div
             key="defusing-banner"
-            initial={{ y: -80, opacity: 0, scale: 0.8 }}
-            animate={{ y: 0, opacity: 1, scale: 1 }}
-            exit={{ y: -80, opacity: 0, scale: 0.8 }}
-            transition={{ type: 'spring', stiffness: 100, damping: 12 }}
-            className="absolute top-20 left-1/2 -translate-x-1/2 z-30 pointer-events-none"
+            initial={{ y: -100, opacity: 0, scale: 0.5, rotate: -2 }}
+            animate={{ y: 0, opacity: 1, scale: 1, rotate: 0 }}
+            exit={{ y: -100, opacity: 0, scale: 0.5, rotate: 2 }}
+            transition={{ type: 'spring', stiffness: 150, damping: 12 }}
+            className="absolute top-16 left-1/2 -translate-x-1/2 z-40 pointer-events-none"
           >
-            <div className="relative bg-red-950/90 border-2 border-red-500/60 backdrop-blur-xl px-8 py-4 rounded-2xl flex items-center gap-5 shadow-[0_0_40px_rgba(220,38,38,0.5)]">
-              {/* Pulsing red glow behind */}
-              <motion.div 
-                className="absolute -inset-2 rounded-3xl bg-red-600/20 blur-xl pointer-events-none"
-                animate={{ opacity: [0.3, 0.7, 0.3], scale: [0.95, 1.05, 0.95] }}
-                transition={{ duration: 1.5, repeat: Infinity, ease: 'easeInOut' }}
-              />
-              <motion.div 
-                className="w-12 h-12 rounded-full bg-gradient-to-br from-red-500 to-red-700 flex items-center justify-center font-cartoon text-white text-xl border-2 border-red-400/50 shadow-[0_0_20px_rgba(220,38,38,0.6)] relative"
-                animate={{ scale: [1, 1.15, 1] }}
-                transition={{ duration: 1, repeat: Infinity, ease: 'easeInOut' }}
-              >
-                {gameState.bombCountdown || 15}
-              </motion.div>
-              <div className="flex flex-col">
-                <motion.span 
-                  className="text-xl mb-0.5"
-                  animate={{ rotate: [0, 10, -10, 0], scale: [1, 1.2, 1] }}
-                  transition={{ duration: 0.8, repeat: Infinity }}
-                >
-                  💣
-                </motion.span>
-                <p className="font-cartoon text-red-200 uppercase tracking-wider text-xs">
-                  {gameState.players.find(p => p.id === gameState.waitingForDefuse)?.name} is defusing!
-                </p>
+            <div className="relative bg-[#faf5ec] border-4 border-red-600 rounded-3xl p-2 shadow-[0_15px_30px_rgba(220,38,38,0.5),0_0_0_4px_rgba(0,0,0,0.1)] overflow-hidden">
+              {/* Hazard stripes border/background */}
+              <div className="absolute inset-0 opacity-10 bg-[repeating-linear-gradient(45deg,transparent,transparent_10px,#dc2626_10px,#dc2626_20px)] pointer-events-none"></div>
+              
+              <div className="bg-red-600 rounded-2xl px-8 py-4 flex items-center gap-6 relative z-10 shadow-inner">
                 <motion.div 
-                  className="h-1 bg-red-900 rounded-full mt-1.5 overflow-hidden"
+                  className="w-16 h-16 rounded-full bg-gradient-to-br from-yellow-300 to-orange-500 flex items-center justify-center font-cartoon text-red-900 text-3xl border-4 border-yellow-200 shadow-[0_0_15px_rgba(250,204,21,0.8)] relative"
+                  animate={{ scale: [1, 1.1, 1] }}
+                  transition={{ duration: 0.5, repeat: Infinity, ease: 'easeInOut' }}
                 >
-                  <motion.div
-                    className="h-full bg-gradient-to-r from-red-500 to-orange-500 rounded-full"
-                    animate={{ width: ['100%', '0%'] }}
-                    transition={{ duration: gameState.bombCountdown || 15, ease: 'linear' }}
-                  />
+                  {gameState.bombCountdown || 15}
                 </motion.div>
+                
+                <div className="flex flex-col">
+                  <div className="flex items-center gap-3 mb-1">
+                    <motion.span 
+                      className="text-3xl filter drop-shadow-md"
+                      animate={{ rotate: [0, 15, -15, 0], scale: [1, 1.2, 1] }}
+                      transition={{ duration: 0.5, repeat: Infinity }}
+                    >
+                      💣
+                    </motion.span>
+                    <p className="font-cartoon text-white uppercase tracking-widest text-2xl drop-shadow-[0_2px_2px_rgba(0,0,0,0.5)]">
+                      {gameState.players.find(p => p.id === gameState.waitingForDefuse)?.name} is defusing!
+                    </p>
+                  </div>
+                  <motion.div 
+                    className="h-2.5 bg-red-950 rounded-full mt-2 overflow-hidden border border-red-800/50"
+                  >
+                    <motion.div
+                      className="h-full bg-gradient-to-r from-yellow-400 via-orange-500 to-red-500 rounded-full"
+                      animate={{ width: ['100%', '0%'] }}
+                      transition={{ duration: gameState.bombCountdown || 15, ease: 'linear' }}
+                    />
+                  </motion.div>
+                </div>
               </div>
             </div>
           </motion.div>
@@ -1682,78 +1679,51 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
             initial={{ opacity: 0 }} 
             animate={{ opacity: 1 }} 
             exit={{ opacity: 0 }}
-            className="absolute inset-0 bg-black/95 backdrop-blur-3xl flex flex-col items-center justify-center z-50 p-6 pointer-events-auto"
+            className="absolute inset-0 bg-red-950/90 backdrop-blur-md flex flex-col items-center justify-center z-50 p-6 pointer-events-auto"
           >
-              {/* Animated fire rings */}
-              <motion.div 
-                className="absolute w-[500px] h-[500px] rounded-full border-2 border-red-500/20 pointer-events-none"
-                animate={{ scale: [0.5, 2], opacity: [0.6, 0] }}
-                transition={{ duration: 2, repeat: Infinity, ease: 'easeOut' }}
-              />
-              <motion.div 
-                className="absolute w-[400px] h-[400px] rounded-full border-2 border-orange-500/20 pointer-events-none"
-                animate={{ scale: [0.5, 2], opacity: [0.5, 0] }}
-                transition={{ duration: 2, repeat: Infinity, ease: 'easeOut', delay: 0.5 }}
-              />
-              <motion.div 
-                className="absolute w-[300px] h-[300px] rounded-full border-2 border-yellow-500/15 pointer-events-none"
-                animate={{ scale: [0.5, 2], opacity: [0.4, 0] }}
-                transition={{ duration: 2, repeat: Infinity, ease: 'easeOut', delay: 1.0 }}
-              />
-              <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,_rgba(220,38,38,0.2)_0%,_rgba(0,0,0,0.9)_70%)] pointer-events-none"></div>
+              <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,_rgba(239,68,68,0.3)_0%,_rgba(0,0,0,0.8)_100%)] pointer-events-none" />
               
-              {/* Floating bomb emojis */}
-              {[...Array(6)].map((_, i) => (
-                <motion.span
-                  key={`bomb-${i}`}
-                  className="absolute text-3xl pointer-events-none"
-                  initial={{ x: 0, y: 0, opacity: 0 }}
-                  animate={{
-                    x: [0, (i % 2 ? 1 : -1) * (80 + i * 30)],
-                    y: [0, -(100 + i * 20)],
-                    opacity: [0, 1, 0],
-                    rotate: [0, (i % 2 ? 1 : -1) * 180],
-                  }}
-                  transition={{ duration: 2, delay: i * 0.3, repeat: Infinity, repeatDelay: 1 }}
-                >
-                  {i % 2 === 0 ? '💣' : '🔥'}
-                </motion.span>
-              ))}
-
-              <motion.h2 
-                className="text-7xl md:text-9xl font-cartoon text-transparent bg-clip-text bg-gradient-to-b from-red-400 via-orange-500 to-red-600 mb-2 drop-shadow-[0_0_30px_rgba(220,38,38,0.9)] relative z-10"
-                animate={{ scale: [1, 1.05, 1], rotate: [0, -2, 2, 0] }}
-                transition={{ duration: 0.5, repeat: Infinity, ease: 'easeInOut' }}
+              <motion.div 
+                className="flex flex-col items-center mb-8 relative z-10"
+                animate={{ y: [-5, 5, -5] }}
+                transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
               >
-                KABOOM!
-              </motion.h2>
-              <p className="text-xl text-red-400 font-mono mb-8 uppercase tracking-[0.2em] animate-pulse">
-                [ SELF-DESTRUCT IN {gameState.bombCountdown ?? 15}s ]
-              </p>
+                <motion.h2 
+                  className="text-7xl md:text-9xl font-cartoon text-transparent bg-clip-text bg-gradient-to-b from-red-300 via-orange-500 to-red-600 drop-shadow-[0_15px_30px_rgba(220,38,38,0.8)] uppercase tracking-tighter"
+                  animate={{ scale: [1, 1.05, 1], rotate: [0, -1, 1, 0] }}
+                  transition={{ duration: 0.3, repeat: Infinity, ease: 'linear' }}
+                >
+                  KABOOM!
+                </motion.h2>
+                <p className="text-xl md:text-2xl text-white font-cartoon uppercase tracking-widest mt-2 bg-black/40 px-6 py-2 rounded-full backdrop-blur-sm border border-red-500/30 shadow-lg">
+                  BOMB EXPLODES IN {gameState.bombCountdown ?? 15}s
+                </p>
+              </motion.div>
               
               {hasDefuse ? (
-                <div className="flex flex-col items-center gap-6 bg-slate-900 border-2 border-red-900/50 p-8 rounded-[2rem] shadow-[0_0_50px_rgba(220,38,38,0.2),inset_0_0_20px_rgba(0,0,0,0.8)] max-w-md w-full relative overflow-hidden">
-                  {/* High-tech diagonal scanlines */}
-                  <div className="absolute inset-0 opacity-10 bg-[repeating-linear-gradient(45deg,transparent,transparent_10px,rgba(0,0,0,1)_10px,rgba(0,0,0,1)_20px)] pointer-events-none"></div>
-
-                  <p className="text-emerald-400 font-mono text-sm uppercase tracking-widest text-center">
-                    &gt; DEFUSE SEQUENCE INITIATED &lt;<br/>
-                    <span className="text-slate-400 text-xs">Awaiting insertion vector...</span>
-                  </p>
+                <motion.div 
+                  className="flex flex-col items-center gap-6 bg-[#faf5ec] border-[6px] border-amber-900/80 p-8 rounded-[2rem] shadow-[0_20px_50px_rgba(0,0,0,0.5),inset_0_0_20px_rgba(120,60,20,0.2)] max-w-lg w-full relative z-10"
+                  initial={{ y: 100, opacity: 0 }}
+                  animate={{ y: 0, opacity: 1 }}
+                  transition={{ type: 'spring', stiffness: 200, damping: 20, delay: 0.2 }}
+                >
+                  <h3 className="text-2xl md:text-3xl font-cartoon text-amber-900 uppercase tracking-widest text-center">
+                    Where do you want to hide the bomb?
+                  </h3>
                   
                   {/* Preset quick buttons */}
-                  <div className="flex gap-3 justify-center w-full z-10">
+                  <div className="flex gap-4 justify-center w-full">
                     <button 
                       onClick={() => { setDefuseInsertIndex(0); onAction({ type: 'DEFUSE', insertIndex: 0 }); }}
-                      className="flex-1 py-3 rounded-xl bg-slate-800 border border-emerald-500/30 text-emerald-400 font-mono uppercase tracking-wider text-xs transition-all hover:bg-emerald-500/20 hover:border-emerald-400 hover:shadow-[0_0_15px_rgba(16,185,129,0.4)] active:scale-95"
+                      className="flex-1 py-4 rounded-2xl bg-gradient-to-b from-amber-400 to-orange-500 border-b-4 border-orange-700 text-white font-cartoon text-xl tracking-wider transition-all hover:brightness-110 active:border-b-0 active:translate-y-1 shadow-md"
                     >
-                      TOP [0]
+                      TOP
                     </button>
                     <button 
                       onClick={() => { setDefuseInsertIndex(1); onAction({ type: 'DEFUSE', insertIndex: 1 }); }}
-                      className="flex-1 py-3 rounded-xl bg-slate-800 border border-slate-700 text-slate-300 font-mono uppercase tracking-wider transition-all hover:bg-slate-700 hover:border-slate-500 active:scale-95 text-xs"
+                      className="flex-1 py-4 rounded-2xl bg-gradient-to-b from-amber-200 to-amber-400 border-b-4 border-amber-600 text-amber-900 font-cartoon text-xl tracking-wider transition-all hover:brightness-110 active:border-b-0 active:translate-y-1 shadow-md"
                     >
-                      2ND [1]
+                      2ND
                     </button>
                     <button 
                       onClick={() => {
@@ -1761,29 +1731,33 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
                         setDefuseInsertIndex(idx);
                         onAction({ type: 'DEFUSE', insertIndex: idx });
                       }}
-                      className="flex-1 py-3 rounded-xl bg-slate-800 border border-slate-700 text-slate-300 font-mono uppercase tracking-wider transition-all hover:bg-slate-700 hover:border-slate-500 active:scale-95 text-xs"
+                      className="flex-1 py-4 rounded-2xl bg-gradient-to-b from-purple-400 to-purple-600 border-b-4 border-purple-800 text-white font-cartoon text-xl tracking-wider transition-all hover:brightness-110 active:border-b-0 active:translate-y-1 shadow-md"
                     >
                       RANDOM
                     </button>
                   </div>
 
-                  <div className="w-full border-t border-slate-800 my-2 z-10" />
+                  <div className="w-full flex items-center gap-4 my-2 opacity-50">
+                    <div className="h-0.5 bg-amber-900/30 flex-1"></div>
+                    <span className="font-cartoon text-amber-900 text-sm">OR</span>
+                    <div className="h-0.5 bg-amber-900/30 flex-1"></div>
+                  </div>
 
                   {/* Custom Position Selection */}
-                  <div className="flex flex-col gap-4 w-full items-center z-10">
+                  <div className="flex flex-col gap-4 w-full items-center">
                     <div className="flex items-center justify-between w-full px-2">
-                      <span className="text-slate-400 font-mono text-xs uppercase">Custom Vector:</span>
-                      <span className="text-emerald-400 font-mono text-xl bg-black/50 px-3 py-1 rounded border border-emerald-900/50 shadow-[inset_0_0_10px_rgba(16,185,129,0.2)]">
-                        {defuseInsertIndex.toString().padStart(2, '0')}
+                      <span className="text-amber-800 font-cartoon text-lg uppercase tracking-wider">Exact Position:</span>
+                      <span className="text-white font-cartoon text-2xl bg-orange-600 px-4 py-1.5 rounded-xl shadow-inner border-2 border-orange-800">
+                        {defuseInsertIndex.toString()}
                       </span>
                     </div>
                     
-                    <div className="flex items-center gap-4 w-full">
+                    <div className="flex items-center gap-4 w-full bg-white/50 p-3 rounded-2xl border-2 border-amber-900/20">
                       <button 
                         type="button"
                         onClick={() => setDefuseInsertIndex(prev => Math.max(0, prev - 1))}
                         disabled={defuseInsertIndex <= 0}
-                        className="w-10 h-10 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center font-mono text-slate-400 hover:text-white hover:border-slate-500 disabled:opacity-30 transition-all text-xl"
+                        className="w-12 h-12 rounded-xl bg-amber-200 border-b-4 border-amber-400 flex items-center justify-center font-cartoon text-amber-900 hover:brightness-105 active:border-b-0 active:translate-y-1 disabled:opacity-50 disabled:active:border-b-4 disabled:active:translate-y-0 text-3xl shadow-sm"
                       >
                         -
                       </button>
@@ -1793,58 +1767,50 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
                         max={gameState.drawPileCount}
                         value={defuseInsertIndex}
                         onChange={(e) => setDefuseInsertIndex(Math.min(gameState.drawPileCount, Math.max(0, parseInt(e.target.value) || 0)))}
-                        className="flex-1 accent-emerald-500 h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer"
+                        className="flex-1 accent-orange-500 h-3 bg-amber-900/20 rounded-full appearance-none cursor-pointer"
                       />
                       <button 
                         type="button"
                         onClick={() => setDefuseInsertIndex(prev => Math.min(gameState.drawPileCount, prev + 1))}
                         disabled={defuseInsertIndex >= gameState.drawPileCount}
-                        className="w-10 h-10 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center font-mono text-slate-400 hover:text-white hover:border-slate-500 disabled:opacity-30 transition-all text-xl"
+                        className="w-12 h-12 rounded-xl bg-amber-200 border-b-4 border-amber-400 flex items-center justify-center font-cartoon text-amber-900 hover:brightness-105 active:border-b-0 active:translate-y-1 disabled:opacity-50 disabled:active:border-b-4 disabled:active:translate-y-0 text-3xl shadow-sm"
                       >
                         +
                       </button>
                     </div>
-                    <span className="text-[9px] text-slate-600 font-mono uppercase text-center mt-[-8px]">
-                      [0 = TOP] ... [{gameState.drawPileCount} = BOTTOM]
+                    <span className="text-xs text-amber-900/60 font-cartoon uppercase text-center mt-[-8px]">
+                      [0 = TOP] • [{gameState.drawPileCount} = BOTTOM]
                     </span>
 
                     <button 
                       onClick={() => onAction({ type: 'DEFUSE', insertIndex: defuseInsertIndex })}
-                      className="w-full mt-2 py-4 rounded-xl bg-emerald-600 font-mono uppercase tracking-[0.2em] text-white text-sm transition-all hover:bg-emerald-500 hover:shadow-[0_0_25px_rgba(16,185,129,0.6)] active:scale-[0.98] font-bold shadow-[inset_0_1px_1px_rgba(255,255,255,0.4)]"
+                      className="w-full mt-2 py-5 rounded-2xl bg-gradient-to-b from-emerald-400 to-green-600 border-b-[6px] border-green-800 font-cartoon uppercase tracking-widest text-white text-2xl transition-all hover:brightness-110 active:border-b-0 active:translate-y-1.5 shadow-lg"
                     >
-                      EXECUTE DEFUSAL
+                      HIDE IT!
                     </button>
                   </div>
-                </div>
+                </motion.div>
               ) : (
                 <motion.div 
-                  className="flex flex-col items-center mt-8"
-                  initial={{ scale: 0 }}
-                  animate={{ scale: 1 }}
-                  transition={{ type: 'spring', stiffness: 80, damping: 10 }}
+                  className="flex flex-col items-center mt-8 z-10"
+                  initial={{ scale: 0.5, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  transition={{ type: 'spring', stiffness: 100, damping: 10 }}
                 >
-                  <motion.span 
-                    className="text-8xl mb-4"
-                    animate={{ scale: [1, 1.2, 1], rotate: [0, -5, 5, 0] }}
-                    transition={{ duration: 0.8, repeat: Infinity }}
-                  >
-                    💀
-                  </motion.span>
-                  <div className="bg-red-950/80 border-2 border-red-500/50 rounded-2xl p-6 max-w-sm text-center relative overflow-hidden">
-                    <div className="absolute inset-0 opacity-10 bg-[repeating-linear-gradient(0deg,transparent,transparent_2px,rgba(255,0,0,0.3)_2px,rgba(255,0,0,0.3)_4px)] pointer-events-none"></div>
-                    <p className="text-3xl font-mono text-red-500 uppercase tracking-widest font-bold relative z-10 animate-pulse">
-                      FATAL ERROR
-                    </p>
-                    <p className="text-sm font-mono text-red-400/70 uppercase tracking-wider mt-2 relative z-10">
+                  <div className="bg-[#faf5ec] border-4 border-red-600 rounded-[2rem] p-8 max-w-sm text-center relative shadow-[0_20px_50px_rgba(0,0,0,0.6)]">
+                    <h2 className="text-4xl md:text-5xl font-cartoon text-red-600 uppercase tracking-tighter drop-shadow-sm mb-4">
+                      YOU ARE DEAD!
+                    </h2>
+                    <p className="text-xl font-cartoon text-amber-900 uppercase tracking-wider mb-6 opacity-80">
                       No Defuse card in hand
                     </p>
-                    <motion.p 
-                      className="text-lg font-cartoon text-red-300 uppercase tracking-widest mt-4 relative z-10"
-                      animate={{ opacity: [0.3, 1, 0.3] }}
+                    <motion.div 
+                      className="inline-block bg-red-600 text-white font-cartoon text-2xl uppercase tracking-widest px-8 py-3 rounded-xl border-b-4 border-red-800"
+                      animate={{ scale: [1, 1.05, 1] }}
                       transition={{ duration: 1, repeat: Infinity }}
                     >
-                      💥 GAME OVER 💥
-                    </motion.p>
+                      GAME OVER
+                    </motion.div>
                   </div>
                 </motion.div>
               )}
@@ -1881,53 +1847,54 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="absolute inset-0 z-[55] pointer-events-none flex items-center justify-center"
+            className="absolute inset-0 z-[60] pointer-events-none flex items-center justify-center"
           >
             {/* Green flash */}
             <motion.div 
-              className="absolute inset-0 bg-emerald-500/10"
+              className="absolute inset-0 bg-emerald-500/20"
               initial={{ opacity: 0 }}
-              animate={{ opacity: [0, 0.3, 0] }}
+              animate={{ opacity: [0, 0.4, 0] }}
               transition={{ duration: 1.5 }}
             />
-            {/* Celebration particles */}
-            {[...Array(12)].map((_, i) => {
-              const angle = (i / 12) * 360;
-              const rad = (angle * Math.PI) / 180;
-              return (
-                <motion.span
-                  key={`defuse-particle-${i}`}
-                  className="absolute text-2xl pointer-events-none"
-                  initial={{ scale: 0, opacity: 0 }}
-                  animate={{
-                    x: [0, Math.cos(rad) * 150],
-                    y: [0, Math.sin(rad) * 150],
-                    scale: [0, 1.2, 0],
-                    opacity: [0, 1, 0],
-                  }}
-                  transition={{ duration: 1.5, delay: i * 0.05, ease: 'easeOut' }}
-                >
-                  {['✨', '🛡️', '⭐', '💚'][i % 4]}
-                </motion.span>
-              );
-            })}
-            {/* Central shield icon */}
+            {/* Action Lines / Burst Background */}
             <motion.div
-              className="flex flex-col items-center"
-              initial={{ scale: 0, rotate: -180 }}
-              animate={{ scale: [0, 1.3, 1], rotate: 0 }}
-              exit={{ scale: 0, opacity: 0 }}
-              transition={{ type: 'spring', stiffness: 100, damping: 10 }}
+              className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(0,0,0,0.5)_0%,transparent_60%)]"
+              initial={{ scale: 0.5, opacity: 0 }}
+              animate={{ scale: [1, 2, 1.5], opacity: [0, 1, 0] }}
+              transition={{ duration: 0.8 }}
+            />
+            {/* Impact Particles */}
+            {[...Array(8)].map((_, i) => (
+              <motion.div
+                key={`defuse-particle-${i}`}
+                className="absolute w-4 h-20 rounded-full bg-gradient-to-t from-emerald-400 to-green-600 opacity-80"
+                style={{ rotate: `${i * 45}deg`, originY: 3 }}
+                initial={{ scaleY: 0, y: 0 }}
+                animate={{ scaleY: [0, 1, 0], y: [0, -120, -180] }}
+                transition={{ duration: 0.6, ease: "easeOut" }}
+              />
+            ))}
+            <motion.div
+              className="flex flex-col items-center justify-center relative z-10"
+              initial={{ scale: 0, opacity: 0, rotate: -15 }}
+              animate={{ scale: [1.5, 0.9, 1.1, 1], opacity: 1, rotate: [15, -5, 2, 0] }}
+              exit={{ scale: 1.5, opacity: 0, filter: "blur(10px)" }}
+              transition={{ type: 'spring', stiffness: 300, damping: 12 }}
             >
-              <span className="text-8xl drop-shadow-[0_0_30px_rgba(16,185,129,0.8)]">🛡️</span>
-              <motion.p 
-                className="font-cartoon text-emerald-400 text-2xl uppercase tracking-widest mt-2 drop-shadow-lg"
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.3 }}
+              <h1 
+                className="relative text-6xl md:text-8xl font-cartoon text-transparent bg-clip-text bg-gradient-to-b from-emerald-300 via-emerald-500 to-green-700 uppercase tracking-tighter text-center leading-none z-10"
+                style={{
+                  WebkitTextStroke: "5px black",
+                  filter: "drop-shadow(6px 10px 0px rgba(0,0,0,0.8)) drop-shadow(0px 0px 30px rgba(16,185,129,0.6))",
+                }}
               >
                 DEFUSED!
-              </motion.p>
+              </h1>
+              <h1 
+                className="absolute top-0 left-0 text-6xl md:text-8xl font-cartoon text-transparent bg-clip-text bg-gradient-to-b from-emerald-300 via-emerald-500 to-green-700 uppercase tracking-tighter text-center leading-none z-20 mix-blend-overlay"
+              >
+                DEFUSED!
+              </h1>
             </motion.div>
           </motion.div>
         )}
@@ -1950,49 +1917,23 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
               animate={{ opacity: [0, 0.4, 0.1, 0.3, 0] }}
               transition={{ duration: 3 }}
             />
-            {/* Explosion burst */}
-            {[...Array(8)].map((_, i) => {
-              const angle = (i / 8) * 360;
-              const rad = (angle * Math.PI) / 180;
-              return (
-                <motion.span
-                  key={`elim-particle-${i}`}
-                  className="absolute text-3xl pointer-events-none"
-                  initial={{ scale: 0, opacity: 0 }}
-                  animate={{
-                    x: [0, Math.cos(rad) * 200],
-                    y: [0, Math.sin(rad) * 200],
-                    scale: [0, 1.5, 0],
-                    opacity: [0, 1, 0],
-                    rotate: [0, 360],
-                  }}
-                  transition={{ duration: 2, delay: i * 0.06, ease: 'easeOut' }}
-                >
-                  {['💥', '🔥', '💀', '☠️', '💣', '🔥', '💥', '☠️'][i]}
-                </motion.span>
-              );
-            })}
-            {/* Central skull and player name */}
             <motion.div
               className="flex flex-col items-center z-10"
-              initial={{ scale: 0 }}
-              animate={{ scale: [0, 1.4, 1] }}
-              transition={{ type: 'spring', stiffness: 80, damping: 10 }}
+              initial={{ scale: 0.5, opacity: 0, rotate: -5 }}
+              animate={{ scale: [1.5, 1], opacity: 1, rotate: [5, -2, 0] }}
+              transition={{ type: 'spring', stiffness: 200, damping: 15 }}
             >
-              <motion.span 
-                className="text-9xl drop-shadow-[0_0_40px_rgba(220,38,38,0.8)]"
-                animate={{ rotate: [0, -10, 10, 0], scale: [1, 1.1, 1] }}
-                transition={{ duration: 1, repeat: 2 }}
-              >
-                💀
-              </motion.span>
+              <h1 className="text-8xl md:text-[10rem] font-cartoon text-transparent bg-clip-text bg-gradient-to-b from-red-500 via-red-600 to-red-900 drop-shadow-[0_15px_30px_rgba(220,38,38,0.9)] uppercase tracking-tighter relative">
+                <span className="absolute inset-0 text-red-500 blur-md opacity-50 z-[-1]">ELIMINATED</span>
+                ELIMINATED
+              </h1>
               <motion.p 
-                className="font-cartoon text-red-400 text-3xl uppercase tracking-widest mt-3 drop-shadow-lg"
+                className="font-cartoon text-white text-3xl md:text-4xl uppercase tracking-widest mt-2 bg-black/50 px-6 py-2 rounded-full border border-red-500/50 backdrop-blur-sm"
                 initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: [0, 1, 1, 0], y: [20, 0, 0, -10] }}
-                transition={{ duration: 3, times: [0, 0.2, 0.7, 1] }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.3 }}
               >
-                {gameState.players.find(p => p.id === eliminatedPlayerId)?.name || 'Player'} ELIMINATED
+                {gameState.players.find(p => p.id === eliminatedPlayerId)?.name || 'Player'}
               </motion.p>
             </motion.div>
           </motion.div>
@@ -2029,28 +1970,75 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
             {/* Combo text */}
             <motion.div
               className="flex flex-col items-center z-10"
-              initial={{ scale: 0, rotate: -20 }}
-              animate={{ scale: [0, 1.3, 1], rotate: 0 }}
-              exit={{ scale: 0, opacity: 0 }}
-              transition={{ type: 'spring', stiffness: 120, damping: 10 }}
+              initial={{ scale: 0, y: 50 }}
+              animate={{ scale: [0, 1.2, 1], y: 0 }}
+              exit={{ scale: 1.5, opacity: 0 }}
+              transition={{ type: 'spring', stiffness: 200, damping: 15 }}
             >
-              <motion.span 
-                className="text-6xl drop-shadow-lg"
-                animate={{ rotate: [0, 15, -15, 0] }}
-                transition={{ duration: 0.6, repeat: 2 }}
+              <h1 className={`text-6xl md:text-8xl font-cartoon text-transparent bg-clip-text bg-gradient-to-b drop-shadow-[0_10px_20px_rgba(0,0,0,0.5)] uppercase tracking-tighter ${
+                comboEffect.count === 3 
+                  ? 'from-fuchsia-300 via-fuchsia-500 to-purple-700' 
+                  : 'from-cyan-300 via-cyan-500 to-blue-700'
+              }`}>
+                {comboEffect.count === 3 ? 'THREE OF A KIND!' : 'PAIR PLAYED!'}
+              </h1>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Action Popup Overlay */}
+      <AnimatePresence>
+        {actionPopup && (
+          <motion.div
+            key={`action-popup-${actionPopup.text}`}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="absolute inset-0 z-[60] pointer-events-none flex items-center justify-center"
+          >
+            {/* Action Lines / Burst Background */}
+            <motion.div
+              className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(0,0,0,0.4)_0%,transparent_60%)]"
+              initial={{ scale: 0.5, opacity: 0 }}
+              animate={{ scale: [1, 1.5, 1.2], opacity: [0, 1, 0] }}
+              transition={{ duration: 0.6 }}
+            />
+            
+            {/* Impact Particles */}
+            {[...Array(6)].map((_, i) => (
+              <motion.div
+                key={`action-particle-${i}`}
+                className={`absolute w-3 h-16 rounded-full bg-gradient-to-t ${actionPopup.color} opacity-80`}
+                style={{ rotate: `${i * 60}deg`, originY: 2.5 }}
+                initial={{ scaleY: 0, y: 0 }}
+                animate={{ scaleY: [0, 1, 0], y: [0, -100, -150] }}
+                transition={{ duration: 0.5, ease: "easeOut" }}
+              />
+            ))}
+
+            <motion.div
+              className="flex flex-col items-center z-10 relative"
+              initial={{ scale: 0, opacity: 0, rotate: -15 }}
+              animate={{ scale: [1.5, 0.9, 1.1, 1], opacity: 1, rotate: [15, -5, 2, 0] }}
+              exit={{ scale: 1.5, opacity: 0, filter: "blur(10px)" }}
+              transition={{ type: 'spring', stiffness: 300, damping: 12 }}
+            >
+              <h1 
+                className={`text-5xl md:text-[7rem] font-cartoon text-transparent bg-clip-text bg-gradient-to-b ${actionPopup.color} uppercase tracking-tighter text-center leading-none relative z-10`}
+                style={{
+                  WebkitTextStroke: "5px black",
+                  filter: "drop-shadow(6px 10px 0px rgba(0,0,0,0.8)) drop-shadow(0px 0px 30px rgba(255,255,255,0.4))",
+                }}
               >
-                {comboEffect.count === 3 ? '🐱🐱🐱' : '🐱🐱'}
-              </motion.span>
-              <motion.p 
-                className={`font-cartoon text-2xl uppercase tracking-widest mt-2 drop-shadow-lg ${
-                  comboEffect.count === 3 ? 'text-fuchsia-400' : 'text-cyan-400'
-                }`}
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.2 }}
+                {actionPopup.text}
+              </h1>
+              {/* Overlay for inner gradient brightness */}
+              <h1 
+                className={`text-5xl md:text-[7rem] font-cartoon text-transparent bg-clip-text bg-gradient-to-b ${actionPopup.color} uppercase tracking-tighter text-center leading-none absolute top-0 left-0 z-20 mix-blend-overlay`}
               >
-                {comboEffect.count === 3 ? '3 OF A KIND!' : 'PAIR COMBO!'}
-              </motion.p>
+                {actionPopup.text}
+              </h1>
             </motion.div>
           </motion.div>
         )}
