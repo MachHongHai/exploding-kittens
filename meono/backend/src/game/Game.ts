@@ -181,6 +181,7 @@ export class Game {
     this.waitingForSteal = null;
     this.waitingForFavor = null;
     this.playerSeeingFuture = null;
+    this.lastSTFPlayerId = null; // Clear STF tracker on turn end
 
     // Move in the current play direction
     do {
@@ -588,6 +589,11 @@ export class Game {
           const attackPrevIndex = this.currentPlayerIndex;
           const attackPrevTurns = player.turnsToPlay;
 
+          // If the attacker just used See The Future and is now attacking, the top card is suspicious
+          if (this.lastSTFPlayerId === player.id) {
+            this.isTopCardSuspect = true;
+          }
+
           // Chained Attack: if player was under attack (turnsToPlay > 1), stack remaining turns + 2
           const stackedTurns = player.turnsToPlay > 1 ? player.turnsToPlay + 2 : 2;
 
@@ -611,6 +617,11 @@ export class Game {
           const skipPrevIndex = this.currentPlayerIndex;
           const skipPrevTurns = player.turnsToPlay;
 
+          // If the skipper just used See The Future and is now skipping, the top card is suspicious
+          if (this.lastSTFPlayerId === player.id) {
+            this.isTopCardSuspect = true;
+          }
+
           this.lastAction = `${player.name} skipped their turn.`;
           player.turnsToPlay -= 1;
           const endedTurn = player.turnsToPlay <= 0;
@@ -631,11 +642,14 @@ export class Game {
           this.drawPile = shuffleDeck(this.drawPile);
           this.players.forEach(p => p.knownDeckTop = []);
           this.lastDefuseAction = null; // Clear suspected positions
+          this.isTopCardSuspect = false; // Deck changed, no longer suspect
           break;
         case CardType.SEE_THE_FUTURE:
           // No additional log needed, keep the "played See The Future!" log
           const top3 = this.drawPile.slice(-3).reverse();
           player.knownDeckTop = top3.map(c => ({ cardType: c.type, cardName: c.name }));
+          this.lastSTFPlayerId = player.id; // Track that this player saw the future
+          this.isTopCardSuspect = false; // Reset suspicion until they skip/attack
           if (!player.isBot) {
             this.playerSeeingFuture = player.id;
           }
@@ -647,11 +661,17 @@ export class Game {
           break;
         case CardType.DRAW_FROM_THE_BOTTOM:
           if (this.deckType === 'IMPLODING_KITTENS') {
+            if (this.lastSTFPlayerId === player.id) {
+              this.isTopCardSuspect = true;
+            }
             ImplodingKittensGameLogic.handleDrawFromBottom(this, player);
           }
           break;
         case CardType.REVERSE:
           if (this.deckType === 'IMPLODING_KITTENS') {
+            if (this.lastSTFPlayerId === player.id) {
+              this.isTopCardSuspect = true;
+            }
             ImplodingKittensGameLogic.handleReverse(this, player);
           }
           break;
@@ -799,6 +819,9 @@ export class Game {
     this.lastNopeableAction = null; // Clear nopeable actions
     const card = this.drawPile.pop();
     if (!card) return 'SAFE';
+
+    // Once a card is drawn, the "suspicious" top card is gone
+    this.isTopCardSuspect = false;
 
     // Shift known top cards for all players
     this.players.forEach(p => {
@@ -969,6 +992,9 @@ export class Game {
 
     // Handle TARGETED_ATTACK separately
     if (type === 'TARGETED_ATTACK') {
+      if (this.lastSTFPlayerId === playerId) {
+        this.isTopCardSuspect = true;
+      }
       ImplodingKittensGameLogic.resolveTargetedAttack(this, player, target);
       return;
     }

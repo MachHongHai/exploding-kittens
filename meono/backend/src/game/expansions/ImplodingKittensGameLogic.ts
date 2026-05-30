@@ -42,6 +42,7 @@ export class ImplodingKittensGameLogic {
 
     game.playerAlteringFuture = null;
     game.alteringFutureCards = [];
+    (game as any).isTopCardSuspect = false; // Reset suspicion after altering
     game.lastAction = `${player.name} altered the future.`;
 
     return true;

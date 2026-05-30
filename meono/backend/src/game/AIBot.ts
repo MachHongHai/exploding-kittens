@@ -114,7 +114,12 @@ export class AIBotController {
 
     const targetTypes = target.hand.map((c: any) => c.type);
 
-    // If a preferred type is specified and target has it, return it
+    // CRITICAL: Always prioritize DEFUSE if target has it, regardless of what the bot prefers
+    if (targetTypes.includes(CardType.DEFUSE)) {
+      return CardType.DEFUSE;
+    }
+
+    // If a preferred type is specified and target has it (and it's not DEFUSE, which we already checked), return it
     if (preferredType && targetTypes.includes(preferredType)) {
       return preferredType;
     }
@@ -464,17 +469,25 @@ export class AIBotController {
     const remainingCards = this.game.drawPile.length;
     const isEndGame = remainingCards <= alivePlayers * 2.5;
 
-    // Check memory for bomb
+    // Bomb knowledge from See The Future memory or public suspicion
+    const isBombOnTop = (player.knownDeckTop.length > 0 &&
+                        player.knownDeckTop[0].cardType === CardType.EXPLODING_KITTEN) ||
+                        (this.game as any).isTopCardSuspect;
+    
+    const isTopCardSafe = player.knownDeckTop.length > 0 &&
+                          player.knownDeckTop[0].cardType !== CardType.EXPLODING_KITTEN &&
+                          player.knownDeckTop[0].cardType !== 'UNKNOWN' &&
+                          !(this.game as any).isTopCardSuspect;
+
     const bombInRangeIndex = player.knownDeckTop.findIndex((c: any, idx: number) => 
       c.cardType === CardType.EXPLODING_KITTEN && idx < player.turnsToPlay
     );
-    const isBombKnown = bombInRangeIndex !== -1;
-
-    // Check suspicion (someone recently defused and we are in draw range)
+    
+    // Check suspicion (someone recently defused or did STF + Skip/Attack)
     const lastDefuse = (this.game as any).lastDefuseAction;
-    const isBombSuspected = lastDefuse && lastDefuse.playerId !== botId && lastDefuse.drawsSinceDefuse === 0;
+    const isBombSuspected = (lastDefuse && lastDefuse.playerId !== botId && lastDefuse.drawsSinceDefuse === 0) ||
+                            (this.game as any).isTopCardSuspect;
 
-    const isTopCardSafe = player.knownDeckTop.length > 0 && player.knownDeckTop[0].cardType !== CardType.EXPLODING_KITTEN && player.knownDeckTop[0].cardType !== 'UNKNOWN';
     const isBombDanger = (isBombKnown || isBombSuspected || remainingCards === 1) && !isTopCardSafe;
 
     const skipOrAttack = player.hand.find(c => c.type === CardType.SKIP || c.type === CardType.ATTACK);
@@ -531,8 +544,9 @@ export class AIBotController {
       }
     }
 
-    // Play See The Future - save for late game or when danger is present, and only if memory is empty
-    if (seeFutureCard && player.knownDeckTop.length === 0 && (isEndGame || Math.random() > 0.8) && remainingCards > 1) {
+    // Play See The Future - save for late game or when danger is present, 
+    // and only if memory is empty AND the card isn't already publicly suspect
+    if (seeFutureCard && player.knownDeckTop.length === 0 && !isBombSuspected && (isEndGame || Math.random() > 0.8) && remainingCards > 1) {
       console.log(`[AIBot - Medium] Playing See The Future.`);
       return { type: 'PLAY_CARDS', cardIds: [seeFutureCard.id] };
     }

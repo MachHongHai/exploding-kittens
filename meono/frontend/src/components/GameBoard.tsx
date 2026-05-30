@@ -152,10 +152,6 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
 
     if (action.includes('Targeted Attack') || actionLower.includes('targeted attack')) {
       setActionPopup({ text: 'TARGETED ATTACK!', color: 'from-red-600 via-orange-600 to-amber-600' });
-    } else if (actionLower.includes('pair')) {
-      setActionPopup({ text: 'PAIR!', color: 'from-yellow-400 to-amber-600' });
-    } else if (actionLower.includes('3 of a kind')) {
-      setActionPopup({ text: '3 OF A KIND!', color: 'from-orange-500 to-red-600' });
     } else if (actionLower.includes('alter the future')) {
       setActionPopup({ text: 'ALTER THE FUTURE!', color: 'from-fuchsia-500 via-purple-600 to-indigo-700' });
     } else if (actionLower.includes('draw from the bottom')) {
@@ -2180,7 +2176,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
                   ? 'from-fuchsia-300 via-fuchsia-500 to-purple-700' 
                   : 'from-cyan-300 via-cyan-500 to-blue-700'
               }`}>
-                {comboEffect.count === 3 ? 'THREE OF A KIND!' : 'PAIR PLAYED!'}
+                {comboEffect.count === 3 ? '3 OF A KIND!' : 'PAIR!'}
               </h1>
             </motion.div>
           </motion.div>
