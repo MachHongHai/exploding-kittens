@@ -132,6 +132,16 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
   const isExploding = gameState.waitingForDefuse === socketId;
   const hasDefuse = myPlayer?.hand?.some(c => c.type === CardType.DEFUSE);
 
+  const [showYourTurn, setShowYourTurn] = useState(false);
+
+  useEffect(() => {
+    if (isMyTurn) {
+      setShowYourTurn(true);
+      const timer = setTimeout(() => setShowYourTurn(false), 2000);
+      return () => clearTimeout(timer);
+    }
+  }, [isMyTurn]);
+
 
 
   const [defuseInsertIndex, setDefuseInsertIndex] = useState<number>(0);
@@ -204,7 +214,8 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
   // Late Nope opportunities (after action window has resolved)
   const isAttackOrSkipNopeable = !!gameState.lastNopeableAction &&
     (gameState.lastNopeableAction.type === 'ATTACK' || gameState.lastNopeableAction.type === 'SKIP') &&
-    gameState.currentPlayerId === socketId;
+    gameState.currentPlayerId === socketId &&
+    gameState.lastNopeableAction.initiatorId !== socketId;
 
   const isResolvedNopeNopeable = !!gameState.lastNopeableAction &&
     gameState.lastNopeableAction.type === 'NOPE' &&
@@ -216,13 +227,15 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
      gameState.lastNopeableAction.type === 'FAVOR') &&
     gameState.lastNopeableAction.targetId === socketId;
   
-  const isNopeOpportunity = isWindowActive || 
+  const isNopeOpportunity = !gameState.waitingForDefuse && (
+    isWindowActive || 
     (gameState.waitingForFavor?.victimId === socketId) || 
     (gameState.waitingForSteal?.victimId === socketId) || 
     isBeingStolenFrom || 
     isAttackOrSkipNopeable ||
     isResolvedNopeNopeable ||
-    isStealOrFavorNopeable;
+    isStealOrFavorNopeable
+  );
 
   const toggleCardSelection = (cardId: string) => {
     setActionError(null);
@@ -233,7 +246,6 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
       return;
     }
 
-    if (gameState.actionWindow) return; // Block other card clicks during the action window
 
     if (isExploding || isStealer || isSeeingFuture) return;
     
@@ -242,8 +254,6 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
       setSelectedCardIds([cardId]); // Only one card for favor
       return;
     }
-
-    if (!isMyTurn) return;
 
     setSelectedCardIds(prev => 
       prev.includes(cardId) ? prev.filter(id => id !== cardId) : [...prev, cardId]
@@ -383,7 +393,9 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
     if (action) {
       onAction(action, (res) => {
         if (res && !res.success) {
-          setActionError(res.message);
+          if (res.message !== "An action is currently waiting for Nope!") {
+            setActionError(res.message);
+          }
           setSelectedCardIds([]);
         } else {
           setSelectedCardIds([]);
@@ -464,11 +476,11 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
 
   const N = myPlayer?.hand?.length || 0;
   const getCardFanStyle = (index: number) => {
-    if (N <= 1) return { rotate: 0, y: 15, x: 0 };
+    if (N <= 1) return { rotate: 0, y: -10, x: 0 };
     const mid = (N - 1) / 2;
     const spread = Math.min(22 / N, 5.5);
     const rotate = (index - mid) * spread;
-    const y = Math.abs(index - mid) * Math.abs(index - mid) * 2 + 15; // Shifts baseline downward to crop cards
+    const y = Math.abs(index - mid) * Math.abs(index - mid) * 2 - 10; // Shifts baseline upward so cards are fully visible
     const x = (index - mid) * -26; // Pulls cards closer for overlap (increased from -18 for larger cards)
     return { rotate, y, x };
   };
@@ -1000,7 +1012,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
         </motion.div>
 
         {/* Middle Area: Draw & Discard Piles */}
-        <div className="relative flex-1 flex flex-row items-center justify-center gap-10 md:gap-16 pointer-events-auto">
+        <div className="relative flex-1 flex flex-row items-center justify-center gap-10 md:gap-16 pointer-events-auto translate-y-6">
 
           {/* Draw Pile */}
           <div className="flex flex-col items-center relative">
@@ -1028,7 +1040,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
                         transition={{ duration: 1.6, delay: i * 0.08, repeat: 0, ease: 'easeInOut' }}
                         className="absolute top-0 left-0 pointer-events-none z-20"
                       >
-                        <CardView disabled className="shadow-[0_0_25px_rgba(239,68,68,0.4)] border-red-500/30 w-24 sm:w-28 h-36 sm:h-42" />
+                        <CardView disabled className="shadow-[0_0_25px_rgba(239,68,68,0.4)] border-red-500/30 w-32 sm:w-40 h-48 sm:h-60" />
                       </motion.div>
                     );
                   })}
@@ -1064,7 +1076,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
               transition={{ duration: 0.6, repeat: isShuffling ? Infinity : 0, ease: 'easeInOut' }}
               onClick={() => isMyTurn && !isExploding && onAction({ type: 'DRAW_CARD' })}
               disabled={!isMyTurn || isExploding}
-              className={`relative group transition-all duration-500 z-10 shrink-0 aspect-[2/3] w-24 sm:w-28 rounded-[1.2rem] p-1.5 bg-[#4d0c0c] border-4 border-[#e25c34]/80 shadow-[0_8px_20px_rgba(0,0,0,0.6)] ${
+              className={`relative group transition-all duration-500 z-10 shrink-0 aspect-[2/3] w-32 sm:w-40 rounded-[1.2rem] p-1.5 bg-[#4d0c0c] border-4 border-[#e25c34]/80 shadow-[0_8px_20px_rgba(0,0,0,0.6)] ${
                 isMyTurn && !isExploding ? 'cursor-pointer hover:scale-105 active:scale-95' : 'cursor-not-allowed opacity-90'
               }`}
             >
@@ -1091,12 +1103,8 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
 
           {/* Discard Pile */}
           <div className="flex flex-col items-center">
-            <div className="relative w-24 sm:w-28 h-36 sm:h-42">
-              {gameState.discardPile.length === 0 ? (
-                <div className="w-full h-full border-4 border-dashed border-amber-900/20 rounded-[1.2rem] flex items-center justify-center bg-black/30 shadow-inner">
-                  <span className="text-amber-100/10 font-cartoon uppercase text-[10px]">Empty</span>
-                </div>
-              ) : (
+            <div className="relative w-32 sm:w-40 h-48 sm:h-60">
+              {gameState.discardPile.length === 0 ? null : (
                 gameState.discardPile.map((card, i) => {
                   const isTop = i === gameState.discardPile.length - 1;
                   const rotation = (i * 11) % 23 - 11;
@@ -1128,15 +1136,12 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
                           transition={{ duration: 1.5, ease: 'easeOut' }}
                         />
                       )}
-                      <CardView card={card} disabled={!isTop} layoutId={card.id} className="w-24 sm:w-28 h-36 sm:h-42" />
+                      <CardView card={card} disabled={!isTop} layoutId={card.id} className="w-32 sm:w-40 h-48 sm:h-60" />
                     </motion.div>
                   )
                 })
               )}
             </div>
-            <span className="mt-2.5 font-cartoon tracking-wider text-amber-100/70 text-[10px] uppercase">
-              Discard
-            </span>
           </div>
         </div>
 
@@ -1154,10 +1159,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
             <div className="absolute -top-1.5 left-7 w-3 h-2 bg-stone-600 rounded" />
             <div className="absolute -top-1.5 right-7 w-3 h-2 bg-stone-600 rounded" />
             
-            <div className="text-[10px] font-cartoon text-[#8c6747] uppercase tracking-wider text-center border-b border-[#ebdcb9] pb-1 mb-1.5 flex items-center justify-center gap-1">
-              📜 Scroll of Acts
-              <span className="text-[8px] text-stone-400 normal-case tracking-normal">({actionHistory.length})</span>
-            </div>
+
 
             <div 
               className="flex-1 flex flex-col gap-[3px] overflow-y-auto custom-scrollbar pr-1"
@@ -1209,9 +1211,9 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
       <div className="relative z-20 w-full flex flex-col items-center justify-end pb-2 bg-gradient-to-t from-black/90 via-black/75 to-transparent pt-12 overflow-visible">
         
         {/* Play Button floating above the hand */}
-        <div className="absolute top-0 pointer-events-none w-full flex flex-col items-center justify-center">
+        <div className="absolute -top-14 pointer-events-none w-full flex flex-col items-center justify-center">
           <AnimatePresence>
-            {selectedCardIds.length > 0 && !isExploding && !isFavorVictim && (
+            {selectedCardIds.length > 0 && isMyTurn && !isExploding && !isFavorVictim && !gameState.actionWindow && (
               <motion.div 
                 initial={{ y: 25, opacity: 0 }} 
                 animate={{ y: 0, opacity: 1 }} 
@@ -1223,7 +1225,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
                   className="group relative inline-flex items-center justify-center px-10 py-3.5 font-cartoon text-xl tracking-widest text-white uppercase bg-gradient-to-r from-orange-500 to-red-600 border-2 border-orange-400/50 rounded-full overflow-hidden transition-all hover:scale-110 active:scale-95 shadow-[0_10px_30px_rgba(249,115,22,0.6)]"
                 >
                   <span className="absolute w-0 h-0 transition-all duration-500 ease-out bg-white rounded-full group-hover:w-56 group-hover:h-56 opacity-10"></span>
-                  <span className="relative drop-shadow-md">Play ({selectedCardIds.length})</span>
+                  <span className="relative drop-shadow-md">Play</span>
                 </button>
                 <span className="text-[9px] text-orange-400 mt-2 font-cartoon uppercase tracking-widest animate-pulse bg-black/40 px-3 py-1 rounded-full border border-orange-500/20 backdrop-blur-sm">
                   Double tap card to play
@@ -1239,17 +1241,22 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
             </div>
           )}
 
-          {/* Phase turn indicator text banner */}
-          <div className={`px-4 py-2 rounded-full font-cartoon uppercase tracking-wider text-[10px] border backdrop-blur-md transition-all duration-1000 pointer-events-auto shadow ${
-            isMyTurn 
-              ? "bg-gradient-to-r from-amber-500 to-orange-600 text-white border-orange-400/40 shadow-[0_0_20px_rgba(245,158,11,0.3)] animate-pulse" 
-              : "bg-black/60 text-slate-400 border-white/5"
-          }`}>
-            {isMyTurn 
-              ? `Your Turn ${myPlayer?.turnsToPlay && myPlayer.turnsToPlay > 1 ? `(${myPlayer.turnsToPlay} Turns)` : ''}` 
-              : "Waiting for other players..."
-            }
-          </div>
+          {/* New YOUR TURN animation */}
+          <AnimatePresence>
+            {showYourTurn && (
+              <motion.div
+                initial={{ scale: 0.5, opacity: 0, y: 50 }}
+                animate={{ scale: 1.2, opacity: 1, y: 0 }}
+                exit={{ scale: 1.5, opacity: 0, y: -50 }}
+                transition={{ type: "spring", stiffness: 300, damping: 20 }}
+                className="absolute -top-32 pointer-events-none z-50 flex items-center justify-center"
+              >
+                <div className="text-6xl md:text-8xl font-cartoon text-transparent bg-clip-text bg-gradient-to-b from-yellow-300 to-orange-500 font-black tracking-widest drop-shadow-[0_5px_15px_rgba(249,115,22,0.8)] uppercase">
+                  YOUR TURN
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
 
         {/* Player Profile, Hand, and Nope Button row */}
@@ -1346,14 +1353,15 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
                           x: isSelected ? 0 : fan.x,
                           zIndex: isSelected ? 50 : index + 10
                         }}
-                        whileHover={(!isMyTurn && !isFavorVictim) || isExploding ? {} : { y: -50, scale: 1.15, zIndex: 100 }}
-                        className="shrink-0 transition-transform origin-bottom overflow-visible"
+                        transition={{ type: 'spring', stiffness: 700, damping: 30 }}
+                        whileHover={isExploding ? {} : { zIndex: 100 }}
+                        className="shrink-0 origin-bottom overflow-visible"
                       >
                         <CardView 
                           card={card} 
                           layoutId={card.id}
                           onClick={() => toggleCardSelection(card.id)}
-                          disabled={(!isMyTurn && !isFavorVictim) || isExploding}
+                          disabled={isExploding && card.type !== 'DEFUSE'}
                           className={`w-28 sm:w-36 h-42 sm:h-54 ${
                             isSelected 
                               ? 'ring-4 ring-orange-500 shadow-[0_0_40px_rgba(249,115,22,0.6)]' 
@@ -2066,7 +2074,9 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
                      if (gameState.waitingForTarget && targetPlayerId) {
                        onAction({ type: 'SELECT_TARGET', targetId: targetPlayerId, requestedCardType: type }, (res) => {
                          if (res && !res.success) {
-                           setActionError(res.message);
+                           if (res.message !== "An action is currently waiting for Nope!") {
+                             setActionError(res.message);
+                           }
                          }
                          setShowGuessModal(false);
                          setTargetPlayerId(null);
@@ -2116,7 +2126,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
             } else {
               btnStyle = "bg-red-900/50 border-b-4 border-red-950/80 text-red-400 hover:bg-red-800/60 cursor-pointer shadow-[0_5px_15px_rgba(220,38,38,0.2)]";
               statusText = "NOPE READY";
-              clickHandler = () => alert("Wait for an action to Nope!");
+              clickHandler = undefined;
               isBtnDisabled = false;
             }
 

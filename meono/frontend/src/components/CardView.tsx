@@ -25,7 +25,7 @@ export const CardView: React.FC<CardViewProps> = ({ card, onClick, disabled, cla
         initial={{ scale: 0.8, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
         exit={{ scale: 0.5, opacity: 0 }}
-        whileHover={!disabled ? { y: -12, scale: 1.05 } : {}}
+        whileHover={!disabled ? { filter: "brightness(1.1)" } : {}}
         whileTap={!disabled ? { scale: 0.95 } : {}}
         onClick={onClick}
         disabled={disabled}
@@ -123,17 +123,14 @@ export const CardView: React.FC<CardViewProps> = ({ card, onClick, disabled, cla
       animate={{ scale: 1, opacity: 1, rotateY: 0 }}
       exit={{ scale: 0.5, opacity: 0, y: 50 }}
       whileHover={!disabled ? {
-        y: -15,
-        scale: 1.08,
-        rotateX: 5,
-        rotateY: -5,
-        boxShadow: `0 20px 25px -5px ${glowColor}, 0 8px 10px -6px rgba(0, 0, 0, 0.5)`
+        boxShadow: `0 20px 25px -5px ${glowColor}, 0 8px 10px -6px rgba(0, 0, 0, 0.5)`,
+        filter: "brightness(1.15)"
       } : {}}
       whileTap={!disabled ? { scale: 0.95 } : {}}
-      transition={{ type: 'spring', stiffness: 200, damping: 20, duration: 0.4 }}
+      transition={{ type: 'spring', stiffness: 500, damping: 25 }}
       onClick={onClick}
       disabled={disabled}
-      className={`relative aspect-[2/3] ${baseSize} p-1.5 rounded-[1.5rem] border backdrop-blur-md shadow-[0_8px_15px_rgba(0,0,0,0.4)] group transition-all duration-300 ${outerShell} ${disabled ? 'opacity-50 cursor-not-allowed grayscale-[40%]' : 'cursor-pointer'
+      className={`relative aspect-[2/3] ${baseSize} p-1.5 rounded-[1.5rem] border backdrop-blur-md shadow-[0_8px_15px_rgba(0,0,0,0.4)] group transition-colors duration-300 ${outerShell} ${disabled ? 'opacity-50 cursor-not-allowed grayscale-[40%]' : 'cursor-pointer'
         } ${className}`}
       style={{ perspective: 1000 }}
     >

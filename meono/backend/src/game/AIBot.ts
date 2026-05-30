@@ -853,6 +853,7 @@ ${historyDesc}
     // Case 5: Attack/Skip active turn change
     if ((lastAction.type === 'ATTACK' || lastAction.type === 'SKIP') &&
         lastAction.targetId === botId &&
+        lastAction.initiatorId !== botId &&
         this.game.getCurrentPlayer().id === botId) {
       
       const aliveCount = this.game.players.filter(p => !p.isEliminated).length;
