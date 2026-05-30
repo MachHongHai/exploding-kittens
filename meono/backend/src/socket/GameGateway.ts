@@ -1,15 +1,15 @@
 import { Server, Socket } from 'socket.io';
-import { Game } from '../game/Game.js';
+import { GameEngine } from '../game/GameEngine.js';
 import { Player } from '../game/models.js';
-import { AIBotController } from '../game/AIBot.js';
+import { OriginalAIBot } from '../game/OriginalAIBot.js';
 import { PlayerAction, CardType } from '../../../shared/src/types.js';
-import { ImplodingKittensGameLogic } from '../game/expansions/ImplodingKittensGameLogic.js';
+import { ImplodingGameLogic } from '../game/expansions/ImplodingGameLogic.js';
 
 export class GameGateway {
   private io: Server;
   // Simplified for demo: Single global game instance
-  private game: Game;
-  private botController: AIBotController;
+  private game: GameEngine;
+  private botController: OriginalAIBot;
   private botDifficulty: 'EASY' | 'MEDIUM' | 'HARD' | 'PLAY_WITH_GEMINI' = 'EASY';
   private bombTimers: Map<string, NodeJS.Timeout> = new Map();
   private nopeTimer: NodeJS.Timeout | null = null;
@@ -25,8 +25,8 @@ export class GameGateway {
 
   constructor(io: Server) {
     this.io = io;
-    this.game = new Game('match_1');
-    this.botController = new AIBotController(this.game);
+    this.game = new GameEngine('match_1');
+    this.botController = new OriginalAIBot(this.game);
     this.setupListeners();
   }
 
@@ -37,8 +37,8 @@ export class GameGateway {
       socket.on('join_match', (data: { name: string, difficulty: 'EASY' | 'MEDIUM' | 'HARD' | 'PLAY_WITH_GEMINI', botCount?: number, deckType?: 'ORIGINAL' | 'IMPLODING_KITTENS' }) => {
         this.clearAllTimers();
         // Reset game for demo purposes when a new player joins
-        this.game = new Game('match_1', data.deckType || 'ORIGINAL');
-        this.botController = new AIBotController(this.game);
+        this.game = new GameEngine('match_1', data.deckType || 'ORIGINAL');
+        this.botController = new OriginalAIBot(this.game);
         this.botDifficulty = data.difficulty;
 
         // Add human
@@ -51,14 +51,13 @@ export class GameGateway {
         }
 
         this.game.start();
-        console.log(`[Game] Started with ${count} bots, difficulty ${this.botDifficulty}`);
+        console.log(`[GameEngine] Started with ${count} bots, difficulty ${this.botDifficulty}`);
 
         this.broadcastState();
         this.checkBotTurn();
       });
 
       socket.on('player_action', async (action: PlayerAction, callback?: (res: any) => void) => {
-        const currentPlayer = this.game.getCurrentPlayer();
         const res = await this.processAction(socket.id, action);
         if (callback) callback(res);
       });
@@ -69,7 +68,7 @@ export class GameGateway {
 
         const player = this.game.players.find(p => p.id === socket.id);
         if (player && !player.isBot) {
-          console.log(`[Game] Human player ${player.name} (${socket.id}) disconnected. Stopping match.`);
+          console.log(`[GameEngine] Human player ${player.name} (${socket.id}) disconnected. Stopping match.`);
           this.game.status = 'GAME_OVER';
           this.clearAllTimers();
         }
@@ -199,7 +198,7 @@ export class GameGateway {
     }, 1000);
 
     const timeout = setTimeout(() => {
-      console.log(`[Game] Player ${playerId} failed to defuse in time.`);
+      console.log(`[GameEngine] Player ${playerId} failed to defuse in time.`);
       this.game.eliminatePlayer(playerId);
       this.clearTimersForPlayer(playerId);
       this.broadcastState();
@@ -253,7 +252,7 @@ export class GameGateway {
     this.stealTimer = setTimeout(async () => {
       const state = this.game.waitingForSteal;
       if (state) {
-        console.log(`[GameGateway] Steal timed out for ${state.stealerId}`);
+        console.log(`[GameEngineGateway] Steal timed out for ${state.stealerId}`);
         const victim = this.game.players.find(p => p.id === state.victimId);
         if (victim && victim.handCount > 0) {
           const randIdx = Math.floor(Math.random() * victim.handCount);
@@ -272,7 +271,7 @@ export class GameGateway {
     this.favorTimer = setTimeout(async () => {
       const state = this.game.waitingForFavor;
       if (state) {
-        console.log(`[GameGateway] Favor timed out for victim ${state.victimId}`);
+        console.log(`[GameEngineGateway] Favor timed out for victim ${state.victimId}`);
         const victim = this.game.players.find(p => p.id === state.victimId);
         if (victim && victim.handCount > 0) {
           const randCard = victim.hand[Math.floor(Math.random() * victim.handCount)];
@@ -291,7 +290,7 @@ export class GameGateway {
     this.alterFutureTimer = setTimeout(async () => {
       const playerId = this.game.playerAlteringFuture;
       if (playerId && this.game.alteringFutureCards.length > 0) {
-        console.log(`[GameGateway] Alter future timed out for ${playerId}. Auto-confirming original order.`);
+        console.log(`[GameEngineGateway] Alter future timed out for ${playerId}. Auto-confirming original order.`);
         // Auto-confirm with original order
         await this.processAction(playerId, { type: 'CONFIRM_ALTER_FUTURE', reorderedCardIds: this.game.alteringFutureCards.map(c => c.id) });
       }
@@ -334,7 +333,7 @@ export class GameGateway {
 
     this.implodingInsertTimer = setTimeout(async () => {
       if (this.game.waitingForImplodingInsert === playerId) {
-        console.log(`[GameGateway] Imploding insert timed out for ${playerId}. Auto-inserting at top.`);
+        console.log(`[GameEngineGateway] Imploding insert timed out for ${playerId}. Auto-inserting at top.`);
         await this.processAction(playerId, { type: 'IMPLODE_INSERT', insertIndex: 0 });
       }
     }, 15000);
@@ -346,7 +345,7 @@ export class GameGateway {
     this.turnTimer = setTimeout(async () => {
       const currentPlayer = this.game.getCurrentPlayer();
       if (currentPlayer && this.game.status === 'PLAYING' && !this.game.pendingAction && !this.game.waitingForDefuse && !this.game.waitingForSteal && !this.game.waitingForFavor && !this.game.waitingForTarget && !this.game.waitingForImplodingInsert) {
-        console.log(`[GameGateway] Turn timed out for ${currentPlayer.name}`);
+        console.log(`[GameEngineGateway] Turn timed out for ${currentPlayer.name}`);
         await this.processAction(currentPlayer.id, { type: 'DRAW_CARD' });
       }
     }, 15000 + delayExtra);
@@ -427,7 +426,7 @@ export class GameGateway {
     } else if (action.type === 'CONFIRM_FUTURE') {
       this.game.clearFuture(playerId);
     } else if (action.type === 'CONFIRM_ALTER_FUTURE') {
-      const success = ImplodingKittensGameLogic.confirmAlterFuture(this.game, playerId, action.reorderedCardIds);
+      const success = ImplodingGameLogic.confirmAlterFuture(this.game, playerId, action.reorderedCardIds);
       actionResult = { success, message: success ? '' : 'Failed to alter future' };
     } else if (action.type === 'DEFUSE') {
       const success = this.game.defuseKitten(playerId, action.insertIndex);
@@ -502,7 +501,7 @@ export class GameGateway {
     if (!currentPlayer || !currentPlayer.isBot || this.game.status !== 'PLAYING') return;
 
     if (this.game.pendingAction || this.game.waitingForFavor || this.game.waitingForSteal || this.game.waitingForImplodingInsert) {
-      console.log(`[GameGateway] Bot turn paused because game has pending action or is waiting for Favor/Steal/ImplodingInsert.`);
+      console.log(`[GameEngineGateway] Bot turn paused because game has pending action or is waiting for Favor/Steal/ImplodingInsert.`);
       return;
     }
 

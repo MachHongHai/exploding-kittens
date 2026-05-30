@@ -504,21 +504,34 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
     if (!isMyTurn || selectedCardIds.length === 0 || gameState.actionWindow) return;
     
     const selectedCards = myPlayer?.hand?.filter(c => selectedCardIds.includes(c.id)) || [];
-    const isSameType = selectedCards.every(c => c.type === selectedCards[0].type);
+    
+    const isCatOrFeral = (type: string) => type.startsWith('CAT_CARD') || type === CardType.FERAL_CAT;
+    const allCatOrFeral = selectedCards.every(c => isCatOrFeral(c.type));
+    
+    let isValidCombo = false;
+    if (selectedCards.every(c => c.type === selectedCards[0].type)) {
+      isValidCombo = true;
+    } else if (allCatOrFeral) {
+      const nonFeralTypes = selectedCards.filter(c => c.type !== CardType.FERAL_CAT).map(c => c.type);
+      const uniqueNonFeral = [...new Set(nonFeralTypes)];
+      if (uniqueNonFeral.length <= 1) {
+        isValidCombo = true;
+      }
+    }
 
     let action: PlayerAction | null = null;
 
     if (selectedCards.length === 1) {
-      if (selectedCards[0].type.startsWith('CAT_CARD')) {
+      if (selectedCards[0].type.startsWith('CAT_CARD') || selectedCards[0].type === CardType.FERAL_CAT) {
         setActionError("Cat cards must be played in pairs!");
         return;
       }
       action = { type: 'PLAY_CARDS', cardIds: selectedCardIds };
     } else if (selectedCards.length === 2) {
-      if (!isSameType) { setActionError("Pairs must be the same card type!"); return; }
+      if (!isValidCombo) { setActionError("Pairs must be the same card type or use a Feral Cat!"); return; }
       action = { type: 'PLAY_CARDS', cardIds: selectedCardIds };
     } else if (selectedCards.length === 3) {
-      if (!isSameType) { setActionError("3 of a kind must be the same card type!"); return; }
+      if (!isValidCombo) { setActionError("3 of a kind must be the same card type or use Feral Cats!"); return; }
       if (!requestedCardType) {
         action = { type: 'PLAY_CARDS', cardIds: selectedCardIds };
       } else {
@@ -1189,23 +1202,33 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
                 transform: 'rotate(-5deg) translateY(-10px)'
               }}
             >
-              <div className="w-full h-full rounded-[0.4rem] flex flex-col items-center justify-center p-2 relative overflow-hidden border border-white/10 shadow-[inset_0_0_10px_rgba(0,0,0,0.3)]">
-                {/* Cat Logo for EK2 */}
-                <svg className="w-10 h-10 sm:w-14 sm:h-14 text-[#facc15] fill-current drop-shadow-md mb-2" viewBox="0 0 64 64">
-                   <path d="M16 40 L16 30 C16 20, 48 20, 48 30 L48 40 Z" fill="#facc15" stroke="#000" strokeWidth="2.5" />
-                   <path d="M16 25 L10 15 L25 22 Z" fill="#facc15" stroke="#000" strokeWidth="2.5" />
-                   <path d="M48 25 L54 15 L39 22 Z" fill="#facc15" stroke="#000" strokeWidth="2.5" />
-                   <path d="M16 35 C5 35, 5 45, 12 45" stroke="#facc15" strokeWidth="4" fill="none" strokeLinecap="round" />
-                </svg>
-                
-                <div className="flex flex-col items-center leading-none tracking-tighter transform -skew-x-3 -rotate-2">
-                  <span className="text-[#facc15] font-black text-sm sm:text-lg drop-shadow-[1px_1px_0_#000]">EXPLODING</span>
-                  <div className="flex items-start">
-                    <span className="text-white font-black text-xl sm:text-3xl drop-shadow-[1px_1px_0_#000] -mt-0.5">KITTENS</span>
-                    <span className="text-white font-black text-[8px] sm:text-[10px] drop-shadow-[1px_1px_0_#000] ml-0.5 -mt-1">®</span>
-                  </div>
-                  <span className="text-white font-black text-3xl sm:text-5xl drop-shadow-[2px_2px_0_#000] -mt-1">2</span>
-                </div>
+              <div className="w-full h-full rounded-[0.4rem] flex flex-col items-center justify-center p-0 relative overflow-hidden border border-white/10 shadow-[inset_0_0_10px_rgba(0,0,0,0.3)]">
+                {gameState.faceUpTopCard ? (
+                  <img 
+                    src={`/cards/${gameState.faceUpTopCard.type}.png`}
+                    alt={gameState.faceUpTopCard.name}
+                    className="absolute inset-0 w-full h-full object-cover pointer-events-none"
+                    onError={(e) => (e.currentTarget.style.display = 'none')}
+                  />
+                ) : (
+                  <>
+                    <svg className="w-10 h-10 sm:w-14 sm:h-14 text-[#facc15] fill-current drop-shadow-md mb-2 mt-2" viewBox="0 0 64 64">
+                       <path d="M16 40 L16 30 C16 20, 48 20, 48 30 L48 40 Z" fill="#facc15" stroke="#000" strokeWidth="2.5" />
+                       <path d="M16 25 L10 15 L25 22 Z" fill="#facc15" stroke="#000" strokeWidth="2.5" />
+                       <path d="M48 25 L54 15 L39 22 Z" fill="#facc15" stroke="#000" strokeWidth="2.5" />
+                       <path d="M16 35 C5 35, 5 45, 12 45" stroke="#facc15" strokeWidth="4" fill="none" strokeLinecap="round" />
+                    </svg>
+                    
+                    <div className="flex flex-col items-center leading-none tracking-tighter transform -skew-x-3 -rotate-2 pb-2">
+                      <span className="text-[#facc15] font-black text-sm sm:text-lg drop-shadow-[1px_1px_0_#000]">EXPLODING</span>
+                      <div className="flex items-start">
+                        <span className="text-white font-black text-xl sm:text-3xl drop-shadow-[1px_1px_0_#000] -mt-0.5">KITTENS</span>
+                        <span className="text-white font-black text-[8px] sm:text-[10px] drop-shadow-[1px_1px_0_#000] ml-0.5 -mt-1">®</span>
+                      </div>
+                      <span className="text-white font-black text-3xl sm:text-5xl drop-shadow-[2px_2px_0_#000] -mt-1">2</span>
+                    </div>
+                  </>
+                )}
               </div>
             </motion.button>
 

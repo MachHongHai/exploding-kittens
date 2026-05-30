@@ -1,12 +1,12 @@
-import { Game } from './Game.js';
+import { GameEngine } from './GameEngine.js';
 import { askAIForMove, BotDecision } from '../services/ai-service.js';
 import { CardType, PlayerAction } from '../../../shared/src/types.js';
-import { ImplodingKittensBotLogic } from './expansions/ImplodingKittensBotLogic.js';
+import { ImplodingAIBot } from './expansions/ImplodingAIBot.js';
 
-export class AIBotController {
-  private game: Game;
+export class OriginalAIBot {
+  private game: GameEngine;
 
-  constructor(game: Game) {
+  constructor(game: GameEngine) {
     this.game = game;
   }
 
@@ -27,7 +27,7 @@ export class AIBotController {
     }
 
     if (this.game.playerAlteringFuture === botId) {
-      const decision = ImplodingKittensBotLogic.handleBotAlteringFuture(botId, this.game);
+      const decision = ImplodingAIBot.handleBotAlteringFuture(botId, this.game);
       if (decision) return decision;
     }
 
@@ -148,6 +148,13 @@ export class AIBotController {
     return target.hand[0].type as CardType;
   }
 
+  private isBomb(cardType: string): boolean {
+    if (this.game.deckType === 'IMPLODING_KITTENS') {
+      return ImplodingAIBot.isBomb(cardType);
+    }
+    return cardType === CardType.EXPLODING_KITTEN;
+  }
+
   /**
    * SAFETY NET: If the bot KNOWS a bomb is on top, try absolutely anything to avoid drawing.
    * This prevents the bot from 'forgetting' bomb knowledge after playing combos.
@@ -156,35 +163,16 @@ export class AIBotController {
   private getLastResortAction(botId: string): PlayerAction | null {
     const player = this.game.players.find(p => p.id === botId)!;
     const hand = player.hand;
-    const isBombOnTop = player.knownDeckTop.length > 0 &&
-                        (player.knownDeckTop[0].cardType === CardType.EXPLODING_KITTEN ||
-                         player.knownDeckTop[0].cardType === CardType.IMPLODING_KITTEN);
+    const isBombOnTop = player.knownDeckTop.length > 0 && this.isBomb(player.knownDeckTop[0].cardType);
 
     if (!isBombOnTop) return null;
 
-    // Expansion cards: try Reverse, Draw From Bottom, Targeted Attack, Alter The Future
-    const reverse = hand.find(c => c.type === CardType.REVERSE);
-    if (reverse) {
-      console.log(`[Expert SAFETY] ${player.name}: Using Reverse to avoid bomb!`);
-      return { type: 'PLAY_CARDS', cardIds: [reverse.id] };
-    }
-
-    const drawBottom = hand.find(c => c.type === CardType.DRAW_FROM_THE_BOTTOM);
-    if (drawBottom) {
-      console.log(`[Expert SAFETY] ${player.name}: Using Draw From Bottom to avoid top bomb!`);
-      return { type: 'PLAY_CARDS', cardIds: [drawBottom.id] };
-    }
-
-    const targetedAttack = hand.find(c => c.type === CardType.TARGETED_ATTACK);
-    if (targetedAttack) {
-      console.log(`[Expert SAFETY] ${player.name}: Using Targeted Attack to avoid drawing!`);
-      return { type: 'PLAY_CARDS', cardIds: [targetedAttack.id] };
-    }
-
-    const alterFuture = hand.find(c => c.type === CardType.ALTER_THE_FUTURE_3X);
-    if (alterFuture) {
-      console.log(`[Expert SAFETY] ${player.name}: Using Alter The Future to rearrange bomb!`);
-      return { type: 'PLAY_CARDS', cardIds: [alterFuture.id] };
+    if (this.game.deckType === 'IMPLODING_KITTENS') {
+      const expansionAction = ImplodingAIBot.getExpansionEscapeAction(botId, this.game);
+      if (expansionAction) {
+        console.log(`[Expert SAFETY] ${player.name}: Using expansion action to avoid bomb!`);
+        return expansionAction;
+      }
     }
 
     // Standard escape cards
@@ -470,25 +458,19 @@ export class AIBotController {
     const isEndGame = remainingCards <= alivePlayers * 2.5;
 
     // Bomb knowledge from See The Future memory or public suspicion
-    const isBombOnTop = (player.knownDeckTop.length > 0 &&
-                        player.knownDeckTop[0].cardType === CardType.EXPLODING_KITTEN) ||
-                        (this.game as any).isTopCardSuspect;
+    const isBombOnTop = player.knownDeckTop.length > 0 &&
+                        this.isBomb(player.knownDeckTop[0].cardType);
     
     const isTopCardSafe = player.knownDeckTop.length > 0 &&
-                          player.knownDeckTop[0].cardType !== CardType.EXPLODING_KITTEN &&
+                          !this.isBomb(player.knownDeckTop[0].cardType) &&
                           player.knownDeckTop[0].cardType !== 'UNKNOWN' &&
                           !(this.game as any).isTopCardSuspect;
 
     const bombInRangeIndex = player.knownDeckTop.findIndex((c: any, idx: number) => 
-      c.cardType === CardType.EXPLODING_KITTEN && idx < player.turnsToPlay
+      this.isBomb(c.cardType) && 
+      idx < player.turnsToPlay
     );
-    
-    // Check suspicion (someone recently defused or did STF + Skip/Attack)
-    const lastDefuse = (this.game as any).lastDefuseAction;
-    const isBombSuspected = (lastDefuse && lastDefuse.playerId !== botId && lastDefuse.drawsSinceDefuse === 0) ||
-                            (this.game as any).isTopCardSuspect;
-
-    const isBombDanger = (isBombKnown || isBombSuspected || remainingCards === 1) && !isTopCardSafe;
+    const isBombKnown = bombInRangeIndex !== -1;
 
     const skipOrAttack = player.hand.find(c => c.type === CardType.SKIP || c.type === CardType.ATTACK);
     const seeFutureCard = player.hand.find(c => c.type === CardType.SEE_THE_FUTURE);
@@ -1059,12 +1041,15 @@ ${historyDesc}
     // IMPORTANT: 'UNKNOWN' entries in knownDeckTop are padding (we DON'T know what's there).
     // Only cards positively identified via See The Future count as "known safe".
     const isBombOnTop = player.knownDeckTop.length > 0 &&
-                        player.knownDeckTop[0].cardType === CardType.EXPLODING_KITTEN;
+                        (player.knownDeckTop[0].cardType === CardType.EXPLODING_KITTEN ||
+                         player.knownDeckTop[0].cardType === CardType.IMPLODING_KITTEN);
     const isTopCardSafe = player.knownDeckTop.length > 0 &&
                           player.knownDeckTop[0].cardType !== CardType.EXPLODING_KITTEN &&
+                          player.knownDeckTop[0].cardType !== CardType.IMPLODING_KITTEN &&
                           player.knownDeckTop[0].cardType !== 'UNKNOWN';
     const bombInDrawRange = player.knownDeckTop.findIndex((c: any, idx: number) =>
-      c.cardType === CardType.EXPLODING_KITTEN && idx < player.turnsToPlay
+      (c.cardType === CardType.EXPLODING_KITTEN || c.cardType === CardType.IMPLODING_KITTEN) && 
+      idx < player.turnsToPlay
     ) !== -1;
 
     // Suspicion from recent defuses by other players

@@ -48,7 +48,6 @@ export function createImplodingKittensDeck(playerCount: number): Card[] {
   addCards(CardType.DRAW_FROM_THE_BOTTOM, 4, 'Draw From the Bottom', 'End your turn by drawing the bottom card from the Draw Pile.');
   addCards(CardType.REVERSE, 4, 'Reverse', 'Reverse the order of play and end your turn without drawing a card.');
   addCards(CardType.TARGETED_ATTACK, 3, 'Targeted Attack 2x', 'End your turn without drawing a card. Force ANY OTHER PLAYER to take 2 turns in a row.');
-  addCards(CardType.IMPLODING_KITTEN, 1, 'Imploding Kitten', 'When drawn face down, put back face up. When drawn face up, explode immediately. Cannot be defused.');
 
   return shuffleDeck(deck);
 }
