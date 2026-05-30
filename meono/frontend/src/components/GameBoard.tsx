@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { CardType } from '../../../shared/src/types';
 import type { GameState, PlayerAction } from '../../../shared/src/types';
 import { CardView } from './CardView';
+import { CountdownOverlay } from './CountdownOverlay';
 import woodTabletop from '../assets/wood_tabletop.png';
 
 interface GameBoardProps {
@@ -19,18 +20,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
     ? { type: gameState.waitingForTarget.type, cardIds: [] as string[] }
     : null;
 
-  const [targetSecondsLeft, setTargetSecondsLeft] = useState<number>(10);
 
-  useEffect(() => {
-    if (!gameState.waitingForTarget) return;
-    const updateTimer = () => {
-      const msLeft = gameState.waitingForTarget!.expiresAt - Date.now();
-      setTargetSecondsLeft(Math.max(0, Math.round(msLeft / 1000)));
-    };
-    updateTimer();
-    const interval = setInterval(updateTimer, 200);
-    return () => clearInterval(interval);
-  }, [gameState.waitingForTarget]);
   const [actionError, setActionError] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [isShuffling, setIsShuffling] = useState(false);
@@ -142,10 +132,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
   const isExploding = gameState.waitingForDefuse === socketId;
   const hasDefuse = myPlayer?.hand?.some(c => c.type === CardType.DEFUSE);
 
-  const totalDuration = 10000; // 10 seconds
-  const percentLeft = gameState.waitingForTarget
-    ? Math.max(0, Math.min(100, ((gameState.waitingForTarget.expiresAt - Date.now()) / totalDuration) * 100))
-    : 0;
+
 
   const [defuseInsertIndex, setDefuseInsertIndex] = useState<number>(0);
 
@@ -177,6 +164,23 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
   // Helper properties to identify any valid Nope opportunity
   const nopeCard = myPlayer?.hand?.find(c => c.type === CardType.NOPE);
   const isWindowActive = !!gameState.actionWindow && !(gameState.actionWindow.initiatorId === socketId && gameState.actionWindow.nopeCount === 0) && gameState.actionWindow.lastNoperId !== socketId;
+  
+  let activeExpiresAt: number | undefined;
+  let countdownLabel = '';
+
+  if (gameState.waitingForTarget?.playerId === socketId && gameState.waitingForTarget?.expiresAt) {
+    activeExpiresAt = gameState.waitingForTarget.expiresAt;
+    countdownLabel = 'Select Target';
+  } else if (gameState.waitingForSteal?.stealerId === socketId && gameState.waitingForSteal?.expiresAt) {
+    activeExpiresAt = gameState.waitingForSteal.expiresAt;
+    countdownLabel = 'Pick a Card';
+  } else if (gameState.waitingForFavor?.victimId === socketId && gameState.waitingForFavor?.expiresAt) {
+    activeExpiresAt = gameState.waitingForFavor.expiresAt;
+    countdownLabel = 'Give a Card';
+  } else if (isMyTurn && gameState.turnExpiresAt) {
+    activeExpiresAt = gameState.turnExpiresAt;
+    countdownLabel = 'Your Turn';
+  }
   
   // Late Nope opportunities (after action window has resolved)
   const isAttackOrSkipNopeable = !!gameState.lastNopeableAction &&
@@ -1578,29 +1582,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
               </p>
             )}
 
-            {/* Countdown timer & progress bar */}
-            <div className="w-full mt-1">
-              <div className="flex justify-between items-center text-[10px] font-cartoon text-slate-400 uppercase tracking-widest mb-1.5 px-1">
-                <span>⏳ Auto-selecting in:</span>
-                <span className="font-bold text-white bg-black/40 px-2 py-0.5 rounded-md border border-white/10 animate-pulse">
-                  {targetSecondsLeft}s
-                </span>
-              </div>
-              <div className="w-full h-2 bg-black/45 rounded-full overflow-hidden border border-white/5 relative">
-                <motion.div
-                  className={`h-full rounded-full ${
-                    showTargetModal.type === 'FAVOR'
-                      ? 'bg-purple-500 shadow-[0_0_10px_rgba(168,85,247,0.7)]'
-                      : showTargetModal.type === '2-CARD'
-                        ? 'bg-orange-500 shadow-[0_0_10px_rgba(249,115,22,0.7)]'
-                        : 'bg-fuchsia-500 shadow-[0_0_10px_rgba(217,70,239,0.7)]'
-                  }`}
-                  initial={{ width: '100%' }}
-                  animate={{ width: `${percentLeft}%` }}
-                  transition={{ duration: 0.2, ease: 'linear' }}
-                />
-              </div>
-            </div>
+
           </motion.div>
         )}
       </AnimatePresence>
@@ -2149,6 +2131,8 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
         </div>
       )}
 
+      {/* Global Countdown Overlay for AFK handling */}
+      <CountdownOverlay expiresAt={activeExpiresAt} label={countdownLabel} />
     </div>
   );
 };

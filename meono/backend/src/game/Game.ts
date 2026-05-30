@@ -28,9 +28,10 @@ export class Game {
     }
   }
   public winner: string | null = null;
+  public turnExpiresAt?: number;
   public waitingForDefuse: string | null = null;
-  public waitingForSteal: { stealerId: string; victimId: string; count: number } | null = null;
-  public waitingForFavor: { requesterId: string; victimId: string } | null = null;
+  public waitingForSteal: { stealerId: string; victimId: string; count: number; expiresAt: number } | null = null;
+  public waitingForFavor: { requesterId: string; victimId: string; expiresAt: number } | null = null;
   public waitingForTarget: { type: 'FAVOR' | '2-CARD' | '3-CARD'; playerId: string; cardIds: string[]; expiresAt: number } | null = null;
   public lastTheft: { stealerId: string; victimId: string; cardId?: string } | null = null;
   public playerSeeingFuture: string | null = null;
@@ -79,6 +80,7 @@ export class Game {
     if (this.players.length < 2) throw new Error("Not enough players");
     this.status = 'PLAYING';
     this.currentPlayerIndex = 0;
+    this.turnExpiresAt = Date.now() + 15000;
 
     // 1. Create base deck
     this.drawPile = createDeck(this.players.length);
@@ -157,6 +159,7 @@ export class Game {
 
     this.currentPlayerIndex = nextIndex;
     this.getCurrentPlayer().turnsToPlay = 1;
+    this.turnExpiresAt = Date.now() + 15000;
   }
 
   clearFuture(playerId: string) {
@@ -440,14 +443,14 @@ export class Game {
       } else if (orig.type === CardType.FAVOR) {
         const target = this.players.find(p => p.id === orig.targetId);
         if (target && target.handCount > 0) {
-          this.waitingForFavor = { requesterId: orig.playerId, victimId: target.id };
+          this.waitingForFavor = { requesterId: orig.playerId, victimId: target.id, expiresAt: Date.now() + 10000 };
         }
       } else if (orig.actionType === '2-CARD') {
         const target = this.players.find(p => p.id === orig.targetId);
         const origPlayer = this.players.find(p => p.id === orig.playerId);
         if (target && target.handCount > 0 && origPlayer) {
           if (!origPlayer.isBot) {
-            this.waitingForSteal = { stealerId: orig.playerId, victimId: target.id, count: 1 };
+            this.waitingForSteal = { stealerId: orig.playerId, victimId: target.id, count: 1, expiresAt: Date.now() + 10000 };
           } else {
             const stolenCard = target.hand.splice(Math.floor(Math.random() * target.handCount), 1)[0];
             origPlayer.drawCard(stolenCard);
@@ -545,7 +548,7 @@ export class Game {
           this.nextTurn();
           const nextPlayer = this.getCurrentPlayer();
           nextPlayer.turnsToPlay = stackedTurns;
-          this.lastAction = `${player.name}'s Attack resolved! ${nextPlayer.name} has ${stackedTurns} turns.`;
+          this.lastAction = `${nextPlayer.name} has ${stackedTurns} turns to play!`;
 
           this.lastNopeableAction = {
             type: 'ATTACK',
@@ -561,7 +564,7 @@ export class Game {
           const skipPrevIndex = this.currentPlayerIndex;
           const skipPrevTurns = player.turnsToPlay;
 
-          this.lastAction = `${player.name}'s Skip resolved.`;
+          this.lastAction = `${player.name} skipped their turn.`;
           player.turnsToPlay -= 1;
           const endedTurn = player.turnsToPlay <= 0;
           if (endedTurn) this.nextTurn();
@@ -577,13 +580,13 @@ export class Game {
           break;
         }
         case CardType.SHUFFLE:
-          this.lastAction = `${player.name}'s Shuffle resolved.`;
+          this.lastAction = `Deck shuffled.`;
           this.drawPile = shuffleDeck(this.drawPile);
           this.players.forEach(p => p.knownDeckTop = []);
           this.lastDefuseAction = null; // Clear suspected positions
           break;
         case CardType.SEE_THE_FUTURE:
-          this.lastAction = `${player.name}'s See The Future resolved.`;
+          // No additional log needed, keep the "played See The Future!" log
           const top3 = this.drawPile.slice(-3).reverse();
           player.knownDeckTop = top3.map(c => ({ cardType: c.type, cardName: c.name }));
           if (!player.isBot) {
@@ -593,8 +596,8 @@ export class Game {
         case CardType.FAVOR:
           const target = this.players.find(p => p.id === action.targetId);
           if (target && target.handCount > 0) {
-            this.waitingForFavor = { requesterId: player.id, victimId: target.id };
-            this.lastAction = `${player.name}'s Favor resolved. Waiting for ${target.name} to give a card.`;
+            this.waitingForFavor = { requesterId: player.id, victimId: target.id, expiresAt: Date.now() + 10000 };
+            this.lastAction = `Waiting for ${target.name} to give a card to ${player.name}.`;
           }
           break;
         default:
@@ -605,12 +608,12 @@ export class Game {
       const target = this.players.find(p => p.id === action.targetId);
       if (target && target.handCount > 0) {
         if (!player.isBot) {
-          this.waitingForSteal = { stealerId: player.id, victimId: target.id, count: 1 };
-          this.lastAction = `${player.name}'s Pair resolved. Waiting to steal from ${target.name}.`;
+          this.waitingForSteal = { stealerId: player.id, victimId: target.id, count: 1, expiresAt: Date.now() + 10000 };
+          this.lastAction = `Waiting for ${player.name} to steal a card from ${target.name}.`;
         } else {
           const stolenCard = target.hand.splice(Math.floor(Math.random() * target.handCount), 1)[0];
           player.drawCard(stolenCard);
-          this.lastAction = `${player.name}'s Pair resolved. Stole a card from ${target.name}.`;
+          this.lastAction = `${player.name} stole a card from ${target.name}.`;
           this.lastTheft = { stealerId: player.id, victimId: target.id, cardId: stolenCard.id };
 
           this.lastNopeableAction = {
@@ -633,7 +636,7 @@ export class Game {
         if (idx !== -1) {
           const stolenCard = target.hand.splice(idx, 1)[0];
           player.drawCard(stolenCard);
-          this.lastAction = `${player.name}'s Triple resolved. Successfully stole ${action.requestedCardType!.replace(/_/g, ' ')} from ${target.name}!`;
+          this.lastAction = `${player.name} successfully guessed and stole ${action.requestedCardType!.replace(/_/g, ' ')} from ${target.name}!`;
           this.lastTheft = { stealerId: player.id, victimId: target.id, cardId: stolenCard.id };
 
           this.lastNopeableAction = {
@@ -647,6 +650,8 @@ export class Game {
               toId: player.id
             }
           };
+        } else {
+          this.lastAction = `${player.name} guessed ${action.requestedCardType!.replace(/_/g, ' ')} from ${target.name} but guess was incorrect.`;
         }
       }
     }
@@ -842,6 +847,7 @@ export class Game {
       discardPile: this.discardPile.slice(-10),
       lastAction: this.lastAction,
       winner: this.winner,
+      turnExpiresAt: this.turnExpiresAt,
       waitingForDefuse: this.waitingForDefuse,
       waitingForSteal: this.waitingForSteal || undefined,
       waitingForFavor: this.waitingForFavor || undefined,

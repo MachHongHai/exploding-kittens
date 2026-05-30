@@ -13,6 +13,9 @@ export class GameGateway {
   private bombTimers: Map<string, NodeJS.Timeout> = new Map();
   private nopeTimer: NodeJS.Timeout | null = null;
   private targetTimer: NodeJS.Timeout | null = null;
+  private stealTimer: NodeJS.Timeout | null = null;
+  private favorTimer: NodeJS.Timeout | null = null;
+  private turnTimer: NodeJS.Timeout | null = null;
   private countdownIntervals: Map<string, NodeJS.Timeout> = new Map();
 
   constructor(io: Server) {
@@ -77,6 +80,12 @@ export class GameGateway {
     this.nopeTimer = null;
     if (this.targetTimer) clearTimeout(this.targetTimer);
     this.targetTimer = null;
+    if (this.stealTimer) clearTimeout(this.stealTimer);
+    this.stealTimer = null;
+    if (this.favorTimer) clearTimeout(this.favorTimer);
+    this.favorTimer = null;
+    if (this.turnTimer) clearTimeout(this.turnTimer);
+    this.turnTimer = null;
     this.countdownIntervals.clear();
   }
 
@@ -104,6 +113,7 @@ export class GameGateway {
     this.nopeTimer = setTimeout(async () => {
       this.game.resolvePendingAction();
       this.nopeTimer = null;
+      this.checkStateTimers();
       this.broadcastState();
       
       // If playing after resolution
@@ -155,6 +165,82 @@ export class GameGateway {
     this.countdownIntervals.set(playerId, interval);
   }
 
+  private checkStateTimers() {
+    if (this.game.status !== 'PLAYING') return;
+
+    if (this.game.waitingForSteal && !this.stealTimer) {
+      this.startStealTimer();
+    } else if (!this.game.waitingForSteal && this.stealTimer) {
+      clearTimeout(this.stealTimer);
+      this.stealTimer = null;
+    }
+
+    if (this.game.waitingForFavor && !this.favorTimer) {
+      this.startFavorTimer();
+    } else if (!this.game.waitingForFavor && this.favorTimer) {
+      clearTimeout(this.favorTimer);
+      this.favorTimer = null;
+    }
+
+    const hasActiveInteraction = this.game.pendingAction || this.game.waitingForTarget || this.game.waitingForSteal || this.game.waitingForFavor || this.game.waitingForDefuse;
+    
+    if (!hasActiveInteraction && !this.turnTimer) {
+      this.startTurnTimer();
+    } else if (hasActiveInteraction && this.turnTimer) {
+      clearTimeout(this.turnTimer);
+      this.turnTimer = null;
+    }
+  }
+
+  private startStealTimer() {
+    if (this.stealTimer) clearTimeout(this.stealTimer);
+    this.stealTimer = setTimeout(async () => {
+      const state = this.game.waitingForSteal;
+      if (state) {
+        console.log(`[GameGateway] Steal timed out for ${state.stealerId}`);
+        const victim = this.game.players.find(p => p.id === state.victimId);
+        if (victim && victim.handCount > 0) {
+          const randIdx = Math.floor(Math.random() * victim.handCount);
+          await this.processAction(state.stealerId, { type: 'STEAL_CARD', victimId: victim.id, cardIndex: randIdx });
+        } else {
+          this.game.waitingForSteal = null;
+          this.checkStateTimers();
+          this.broadcastState();
+        }
+      }
+    }, 10000);
+  }
+
+  private startFavorTimer() {
+    if (this.favorTimer) clearTimeout(this.favorTimer);
+    this.favorTimer = setTimeout(async () => {
+      const state = this.game.waitingForFavor;
+      if (state) {
+        console.log(`[GameGateway] Favor timed out for victim ${state.victimId}`);
+        const victim = this.game.players.find(p => p.id === state.victimId);
+        if (victim && victim.handCount > 0) {
+          const randCard = victim.hand[Math.floor(Math.random() * victim.handCount)];
+          await this.processAction(state.victimId, { type: 'GIVE_CARD', requesterId: state.requesterId, cardId: randCard.id });
+        } else {
+          this.game.waitingForFavor = null;
+          this.checkStateTimers();
+          this.broadcastState();
+        }
+      }
+    }, 10000);
+  }
+
+  private startTurnTimer() {
+    if (this.turnTimer) clearTimeout(this.turnTimer);
+    this.turnTimer = setTimeout(async () => {
+      const currentPlayer = this.game.getCurrentPlayer();
+      if (currentPlayer && this.game.status === 'PLAYING' && !this.game.pendingAction && !this.game.waitingForDefuse && !this.game.waitingForSteal && !this.game.waitingForFavor && !this.game.waitingForTarget) {
+        console.log(`[GameGateway] Turn timed out for ${currentPlayer.name}`);
+        await this.processAction(currentPlayer.id, { type: 'DRAW_CARD' });
+      }
+    }, 15000);
+  }
+
   private async processAction(playerId: string, action: PlayerAction) {
     let result: 'SAFE' | 'EXPLODED' | 'DEFUSE_REQUIRED' = 'SAFE';
     let actionResult: { success: boolean; message?: string } = { success: true, message: '' };
@@ -167,7 +253,17 @@ export class GameGateway {
       }
     } else if (action.type === 'PLAY_CARDS') {
       actionResult = this.game.playCards(playerId, action.cardIds, action.targetId, action.requestedCardType);
+      
       if (actionResult.success) {
+        // Reset turn timer immediately upon playing a card to prevent AFK timeouts during Action Windows
+        if (this.turnTimer) {
+           clearTimeout(this.turnTimer);
+           this.turnTimer = null;
+        }
+        if (this.game.status === 'PLAYING') {
+           this.game.turnExpiresAt = Date.now() + 15000;
+        }
+
         if (this.game.pendingAction) {
           this.startNopeTimer();
           return actionResult; // Return immediately to let timer handle next steps
@@ -208,6 +304,20 @@ export class GameGateway {
       } else {
         return { success: false, message: "Invalid defuse action" };
       }
+    }
+
+    if (actionResult.success) {
+      if (action.type === 'PLAY_CARDS' || action.type === 'DRAW_CARD' || action.type === 'DEFUSE') {
+        // Reset turn timer when taking these specific actions
+        if (this.turnTimer) {
+           clearTimeout(this.turnTimer);
+           this.turnTimer = null;
+        }
+        if (this.game.status === 'PLAYING') {
+           this.game.turnExpiresAt = Date.now() + 15000;
+        }
+      }
+      this.checkStateTimers();
     }
 
     this.broadcastState();

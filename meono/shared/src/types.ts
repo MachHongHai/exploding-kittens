@@ -41,16 +41,19 @@ export interface GameState {
   discardPile: Card[];
   lastAction: string | null;
   winner: string | null;
+  turnExpiresAt?: number;
   waitingForDefuse: string | null;
   bombCountdown?: number; 
   waitingForSteal?: {
     stealerId: string;
     victimId: string;
     count: number;
+    expiresAt: number;
   };
   waitingForFavor?: {
     requesterId: string;
     victimId: string;
+    expiresAt: number;
   };
   lastTheft?: {
     stealerId: string;
