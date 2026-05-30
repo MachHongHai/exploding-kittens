@@ -357,7 +357,7 @@ export class GameGateway {
     let delayExtra = 0;
 
     if (action.type === 'DRAW_CARD') {
-      if (this.game.pendingAction) return { success: false, message: "Wait for action to resolve!" };
+      if (this.game.isInteractionPending()) return { success: false, message: "Wait for interaction to resolve!" };
       result = this.game.drawPhase(playerId);
       if (result === 'DEFUSE_REQUIRED') {
         if (this.game.waitingForImplodingInsert) {
@@ -367,7 +367,7 @@ export class GameGateway {
         }
       }
     } else if (action.type === 'DRAW_FROM_BOTTOM') {
-      if (this.game.pendingAction) return { success: false, message: "Wait for action to resolve!" };
+      if (this.game.isInteractionPending()) return { success: false, message: "Wait for interaction to resolve!" };
       result = this.game.drawFromBottom(playerId);
       if (result === 'DEFUSE_REQUIRED') {
         if (this.game.waitingForImplodingInsert) {
@@ -500,8 +500,8 @@ export class GameGateway {
     const currentPlayer = this.game.getCurrentPlayer();
     if (!currentPlayer || !currentPlayer.isBot || this.game.status !== 'PLAYING') return;
 
-    if (this.game.pendingAction || this.game.waitingForFavor || this.game.waitingForSteal || this.game.waitingForImplodingInsert) {
-      console.log(`[GameEngineGateway] Bot turn paused because game has pending action or is waiting for Favor/Steal/ImplodingInsert.`);
+    if (this.game.isInteractionPending()) {
+      console.log(`[GameEngineGateway] Bot turn paused because game has a pending interaction.`);
       return;
     }
 

@@ -1170,7 +1170,17 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
               } : {}}
               transition={{ duration: 0.6, repeat: isShuffling ? Infinity : 0, ease: 'easeInOut' }}
               onClick={() => {
-                if (isMyTurn && !isExploding && !isPawDrawing) {
+                const isInteractionPending = !!(
+                  gameState.actionWindow || 
+                  gameState.waitingForDefuse || 
+                  gameState.waitingForTarget || 
+                  gameState.waitingForSteal || 
+                  gameState.waitingForFavor || 
+                  gameState.waitingForImplodingInsert || 
+                  gameState.futureCards || 
+                  gameState.alteringFutureCards
+                );
+                if (isMyTurn && !isExploding && !isPawDrawing && !isInteractionPending) {
                   setIsPawDrawing(true);
                   setTimeout(() => {
                     onAction({ type: 'DRAW_CARD' });
@@ -1178,7 +1188,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
                   }, 600); // Trigger action later because animation is slower
                 }
               }}
-              disabled={!isMyTurn || isExploding || isPawDrawing}
+              disabled={!isMyTurn || isExploding || isPawDrawing || !!(gameState.actionWindow || gameState.waitingForDefuse || gameState.waitingForTarget || gameState.waitingForImplodingInsert)}
               className={`relative group transition-all duration-300 z-10 shrink-0 aspect-[2.5/3.5] w-32 sm:w-40 rounded-[0.6rem] bg-[#8b1a28] border-2 border-black/90 ${
                 isMyTurn && !isExploding ? 'cursor-pointer hover:scale-105 active:translate-y-2 active:shadow-none' : 'cursor-not-allowed opacity-90'
               }`}

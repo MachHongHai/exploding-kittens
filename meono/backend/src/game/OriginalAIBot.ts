@@ -163,7 +163,7 @@ export class OriginalAIBot {
   private getLastResortAction(botId: string): PlayerAction | null {
     const player = this.game.players.find(p => p.id === botId)!;
     const hand = player.hand;
-    const isBombOnTop = player.knownDeckTop.length > 0 && this.isBomb(player.knownDeckTop[0].cardType);
+    const isBombOnTop = (player.knownDeckTop.length > 0 && this.isBomb(player.knownDeckTop[0].cardType)) || (this.game as any).isTopCardSuspect;
 
     if (!isBombOnTop) return null;
 
@@ -458,8 +458,9 @@ export class OriginalAIBot {
     const isEndGame = remainingCards <= alivePlayers * 2.5;
 
     // Bomb knowledge from See The Future memory or public suspicion
-    const isBombOnTop = player.knownDeckTop.length > 0 &&
-                        this.isBomb(player.knownDeckTop[0].cardType);
+    const isBombOnTop = (player.knownDeckTop.length > 0 &&
+                        this.isBomb(player.knownDeckTop[0].cardType)) ||
+                        (this.game as any).isTopCardSuspect;
     
     const isTopCardSafe = player.knownDeckTop.length > 0 &&
                           !this.isBomb(player.knownDeckTop[0].cardType) &&
@@ -471,6 +472,13 @@ export class OriginalAIBot {
       idx < player.turnsToPlay
     );
     const isBombKnown = bombInRangeIndex !== -1;
+
+    // Check suspicion (someone recently defused or did STF + Skip/Attack)
+    const lastDefuse = (this.game as any).lastDefuseAction;
+    const isBombSuspected = (lastDefuse && lastDefuse.playerId !== botId && lastDefuse.drawsSinceDefuse === 0) ||
+                            (this.game as any).isTopCardSuspect;
+
+    const isBombDanger = (isBombKnown || isBombSuspected || remainingCards === 1) && !isTopCardSafe;
 
     const skipOrAttack = player.hand.find(c => c.type === CardType.SKIP || c.type === CardType.ATTACK);
     const seeFutureCard = player.hand.find(c => c.type === CardType.SEE_THE_FUTURE);
@@ -491,8 +499,8 @@ export class OriginalAIBot {
         return { type: 'PLAY_CARDS', cardIds: [skipOrAttack.id] };
       }
       
-      // Scout before shuffling if we don't know what's coming
-      if (seeFutureCard && player.knownDeckTop.length === 0 && remainingCards > 1) {
+      // Scout before shuffling if we don't know what's coming AND it's not already confirmed by public suspicion
+      if (seeFutureCard && player.knownDeckTop.length === 0 && !(this.game as any).isTopCardSuspect && remainingCards > 1) {
         console.log(`[AIBot - Medium] Bot ${player.name} scouting with See The Future under danger.`);
         return { type: 'PLAY_CARDS', cardIds: [seeFutureCard.id] };
       }
@@ -1040,15 +1048,15 @@ ${historyDesc}
     // Bomb knowledge from See The Future memory
     // IMPORTANT: 'UNKNOWN' entries in knownDeckTop are padding (we DON'T know what's there).
     // Only cards positively identified via See The Future count as "known safe".
-    const isBombOnTop = player.knownDeckTop.length > 0 &&
-                        (player.knownDeckTop[0].cardType === CardType.EXPLODING_KITTEN ||
-                         player.knownDeckTop[0].cardType === CardType.IMPLODING_KITTEN);
+    const isBombOnTop = (player.knownDeckTop.length > 0 &&
+                        this.isBomb(player.knownDeckTop[0].cardType)) ||
+                        (this.game as any).isTopCardSuspect;
     const isTopCardSafe = player.knownDeckTop.length > 0 &&
-                          player.knownDeckTop[0].cardType !== CardType.EXPLODING_KITTEN &&
-                          player.knownDeckTop[0].cardType !== CardType.IMPLODING_KITTEN &&
-                          player.knownDeckTop[0].cardType !== 'UNKNOWN';
+                          !this.isBomb(player.knownDeckTop[0].cardType) &&
+                          player.knownDeckTop[0].cardType !== 'UNKNOWN' &&
+                          !(this.game as any).isTopCardSuspect;
     const bombInDrawRange = player.knownDeckTop.findIndex((c: any, idx: number) =>
-      (c.cardType === CardType.EXPLODING_KITTEN || c.cardType === CardType.IMPLODING_KITTEN) && 
+      this.isBomb(c.cardType) && 
       idx < player.turnsToPlay
     ) !== -1;
 

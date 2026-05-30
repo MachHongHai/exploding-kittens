@@ -823,8 +823,21 @@ export class GameEngine {
     return true;
   }
 
+  isInteractionPending(): boolean {
+    return !!(
+      this.pendingAction || 
+      this.waitingForTarget || 
+      this.waitingForSteal || 
+      this.waitingForFavor || 
+      this.waitingForDefuse || 
+      this.waitingForImplodingInsert || 
+      this.playerSeeingFuture || 
+      this.playerAlteringFuture
+    );
+  }
+
   drawPhase(playerId: string): 'SAFE' | 'EXPLODED' | 'DEFUSE_REQUIRED' {
-    if (this.status !== 'PLAYING' || this.waitingForDefuse) return 'SAFE';
+    if (this.status !== 'PLAYING' || this.isInteractionPending()) return 'SAFE';
     const player = this.getCurrentPlayer();
     if (player.id !== playerId) return 'SAFE';
 
@@ -921,7 +934,7 @@ export class GameEngine {
   }
 
   drawFromBottom(playerId: string): 'SAFE' | 'EXPLODED' | 'DEFUSE_REQUIRED' {
-    if (this.status !== 'PLAYING' || this.waitingForDefuse || this.waitingForImplodingInsert) return 'SAFE';
+    if (this.status !== 'PLAYING' || this.isInteractionPending()) return 'SAFE';
     const player = this.getCurrentPlayer();
     if (player.id !== playerId) return 'SAFE';
 

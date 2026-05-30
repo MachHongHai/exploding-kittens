@@ -87,7 +87,8 @@ export class ImplodingGameLogic {
     game.lastAction = `${player.name} placed the Imploding Kitten back face-up.`;
 
     game.waitingForImplodingInsert = null;
-    if (--player.turnsToPlay <= 0) game.nextTurn();
+    player.turnsToPlay = 0; // Turn ends immediately after placing it back
+    game.nextTurn();
     return true;
   }
   
