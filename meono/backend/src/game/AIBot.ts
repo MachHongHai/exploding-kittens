@@ -149,7 +149,7 @@ export class AIBotController {
     }
 
     const shuffle = hand.find(c => c.type === CardType.SHUFFLE);
-    if (shuffle) {
+    if (shuffle && this.game.drawPile.length > 1) {
       console.log(`[Expert SAFETY] ${player.name}: Found Shuffle! Randomizing bomb position.`);
       return { type: 'PLAY_CARDS', cardIds: [shuffle.id] };
     }
@@ -185,7 +185,7 @@ export class AIBotController {
 
     // Try See The Future (won't save us, but buys info for next turn — better than nothing)
     const stf = hand.find(c => c.type === CardType.SEE_THE_FUTURE);
-    if (stf) {
+    if (stf && this.game.drawPile.length > 1) {
       console.log(`[Expert SAFETY] ${player.name}: Playing See The Future as stall tactic.`);
       return { type: 'PLAY_CARDS', cardIds: [stf.id] };
     }
@@ -335,7 +335,7 @@ export class AIBotController {
       if (!counts[c.type]) counts[c.type] = [];
       counts[c.type].push(c.id);
     });
-    const pairType = this.getValidComboType(counts, 2, false);
+    const pairType = this.getValidComboType(counts, 2, this.game.drawPile.length === 1);
     if (pairType && Math.random() > 0.3) {
       const opponents = this.game.players.filter(p => p.id !== botId && !p.isEliminated && p.handCount > 0);
       const pairTargetId = opponents.length > 0 ? opponents[Math.floor(Math.random() * opponents.length)].id : undefined;
@@ -362,6 +362,9 @@ export class AIBotController {
       }
 
       // For SEE_THE_FUTURE or SHUFFLE, Easy bot just plays them immediately
+      if ((cardToPlay.type === CardType.SEE_THE_FUTURE || cardToPlay.type === CardType.SHUFFLE) && this.game.drawPile.length === 1) {
+        return { type: 'DRAW_CARD' };
+      }
       return { type: 'PLAY_CARDS', cardIds: [cardToPlay.id], targetId };
     }
 
@@ -412,7 +415,7 @@ export class AIBotController {
     const isBombSuspected = lastDefuse && lastDefuse.playerId !== botId && lastDefuse.drawsSinceDefuse === 0;
 
     const isTopCardSafe = player.knownDeckTop.length > 0 && player.knownDeckTop[0].cardType !== CardType.EXPLODING_KITTEN && player.knownDeckTop[0].cardType !== 'UNKNOWN';
-    const isBombDanger = (isBombKnown || isBombSuspected) && !isTopCardSafe;
+    const isBombDanger = (isBombKnown || isBombSuspected || remainingCards === 1) && !isTopCardSafe;
 
     const skipOrAttack = player.hand.find(c => c.type === CardType.SKIP || c.type === CardType.ATTACK);
     const seeFutureCard = player.hand.find(c => c.type === CardType.SEE_THE_FUTURE);
@@ -434,12 +437,12 @@ export class AIBotController {
       }
       
       // Scout before shuffling if we don't know what's coming
-      if (seeFutureCard && player.knownDeckTop.length === 0) {
+      if (seeFutureCard && player.knownDeckTop.length === 0 && remainingCards > 1) {
         console.log(`[AIBot - Medium] Bot ${player.name} scouting with See The Future under danger.`);
         return { type: 'PLAY_CARDS', cardIds: [seeFutureCard.id] };
       }
 
-      if (shuffleCard && isBombDanger) {
+      if (shuffleCard && isBombDanger && remainingCards > 1) {
         console.log(`[AIBot - Medium] Bot ${player.name} playing shuffle under danger.`);
         return { type: 'PLAY_CARDS', cardIds: [shuffleCard.id] };
       }
@@ -468,13 +471,13 @@ export class AIBotController {
     }
 
     // Play See The Future - save for late game or when danger is present, and only if memory is empty
-    if (seeFutureCard && player.knownDeckTop.length === 0 && (isEndGame || Math.random() > 0.8)) {
+    if (seeFutureCard && player.knownDeckTop.length === 0 && (isEndGame || Math.random() > 0.8) && remainingCards > 1) {
       console.log(`[AIBot - Medium] Playing See The Future.`);
       return { type: 'PLAY_CARDS', cardIds: [seeFutureCard.id] };
     }
 
     // Play Shuffle if we don't know the deck top and it's late game
-    if (shuffleCard && isEndGame && !isTopCardSafe && Math.random() > 0.8) {
+    if (shuffleCard && isEndGame && !isTopCardSafe && Math.random() > 0.8 && remainingCards > 1) {
       console.log(`[AIBot - Medium] Playing Shuffle preventative.`);
       return { type: 'PLAY_CARDS', cardIds: [shuffleCard.id] };
     }
@@ -1011,9 +1014,10 @@ ${historyDesc}
       if (!counts[c.type]) counts[c.type] = [];
       counts[c.type].push(c.id);
     });
-    const isDesperation = isDangerZone && escapeCount === 0 && shuffleCards.length === 0;
-    const pairType = this.getValidComboType(counts, 2, isDesperation);
-    const tripletType = this.getValidComboType(counts, 3, isDesperation);
+    const shuffleUseful = deckSize > 1;
+    const isDesperation = (isDangerZone || deckSize === 1) && escapeCount === 0 && (!shuffleUseful || shuffleCards.length === 0);
+    const pairType = this.getValidComboType(counts, 2, isDesperation || deckSize === 1);
+    const tripletType = this.getValidComboType(counts, 3, isDesperation || deckSize === 1);
 
     // Strategic target selection
     const target = this.selectStrategicTarget(botId);
@@ -1051,17 +1055,17 @@ ${historyDesc}
         return { type: 'PLAY_CARDS', cardIds: [skipCards[0].id] };
       }
       // 1c. Shuffle if we KNOW bomb is in our draw range (e.g. we just placed it but deck was too small)
-      if (bombInDrawRange && shuffleCards.length > 0) {
+      if (bombInDrawRange && shuffleCards.length > 0 && deckSize > 1) {
         console.log(`[Expert] ${player.name}: Bomb in draw range under attack! Shuffling to randomize.`);
         return { type: 'PLAY_CARDS', cardIds: [shuffleCards[0].id] };
       }
       // 1d. Scout before forced draw
-      if (seeFutureCards.length > 0 && player.knownDeckTop.length === 0) {
+      if (seeFutureCards.length > 0 && player.knownDeckTop.length === 0 && deckSize > 1) {
         console.log(`[Expert] ${player.name}: Scouting deck before forced draw under attack.`);
         return { type: 'PLAY_CARDS', cardIds: [seeFutureCards[0].id] };
       }
       // 1e. Shuffle if bomb known or strongly suspected (after scouting)
-      if (isDangerZone && shuffleCards.length > 0) {
+      if (isDangerZone && shuffleCards.length > 0 && deckSize > 1) {
         console.log(`[Expert] ${player.name}: Shuffling deck under attack with bomb danger.`);
         return { type: 'PLAY_CARDS', cardIds: [shuffleCards[0].id] };
       }
@@ -1098,7 +1102,7 @@ ${historyDesc}
       console.log(`[Expert] ${player.name}: BOMB ${threatLevel}! Survival protocol activated.`);
 
       // 2a. If only suspected (not confirmed), verify with See The Future before wasting escape cards
-      if (!isBombOnTop && !bombInDrawRange && seeFutureCards.length > 0 && player.knownDeckTop.length === 0) {
+      if (!isBombOnTop && !bombInDrawRange && seeFutureCards.length > 0 && player.knownDeckTop.length === 0 && deckSize > 1) {
         console.log(`[Expert] ${player.name}: Verifying suspected bomb with See The Future before committing escape cards.`);
         return { type: 'PLAY_CARDS', cardIds: [seeFutureCards[0].id] };
       }
@@ -1118,7 +1122,7 @@ ${historyDesc}
       }
 
       // 2d. Shuffle (no Skip/Attack available - randomize bomb position as last resort)
-      if (shuffleCards.length > 0) {
+      if (shuffleCards.length > 0 && deckSize > 1) {
         console.log(`[Expert] ${player.name}: No escape cards! Shuffling to randomize bomb.`);
         return { type: 'PLAY_CARDS', cardIds: [shuffleCards[0].id] };
       }
@@ -1156,7 +1160,7 @@ ${historyDesc}
       console.log(`[Expert] ${player.name}: CRITICAL DECK (${deckSize} cards). Hyper-defensive mode.`);
 
       // 3a. Always scout before drawing
-      if (seeFutureCards.length > 0 && player.knownDeckTop.length === 0) {
+      if (seeFutureCards.length > 0 && player.knownDeckTop.length === 0 && deckSize > 1) {
         console.log(`[Expert] ${player.name}: Critical scouting with See The Future.`);
         return { type: 'PLAY_CARDS', cardIds: [seeFutureCards[0].id] };
       }
@@ -1192,7 +1196,7 @@ ${historyDesc}
       }
 
       // 3d. Shuffle as last resort if unknown deck
-      if (shuffleCards.length > 0 && player.knownDeckTop.length === 0) {
+      if (shuffleCards.length > 0 && player.knownDeckTop.length === 0 && deckSize > 1) {
         console.log(`[Expert] ${player.name}: Critical Shuffle to randomize before forced draw.`);
         return { type: 'PLAY_CARDS', cardIds: [shuffleCards[0].id] };
       }
@@ -1250,7 +1254,7 @@ ${historyDesc}
       console.log(`[Expert] ${player.name}: End game (${deckSize} cards left). Tactical play.`);
 
       // 4a. ALWAYS scout before drawing if we have no intel
-      if (seeFutureCards.length > 0 && player.knownDeckTop.length === 0) {
+      if (seeFutureCards.length > 0 && player.knownDeckTop.length === 0 && deckSize > 1) {
         console.log(`[Expert] ${player.name}: End game scouting.`);
         return { type: 'PLAY_CARDS', cardIds: [seeFutureCards[0].id] };
       }
@@ -1305,7 +1309,7 @@ ${historyDesc}
       }
 
       // 4e. Shuffle if someone recently defused (bomb near top)
-      if (isBombSuspected && shuffleCards.length > 0) {
+      if (isBombSuspected && shuffleCards.length > 0 && deckSize > 1) {
         console.log(`[Expert] ${player.name}: End game Shuffle after recent opponent defuse.`);
         return { type: 'PLAY_CARDS', cardIds: [shuffleCards[0].id] };
       }

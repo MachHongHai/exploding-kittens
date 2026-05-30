@@ -33,8 +33,10 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
   // Kitten Chance states
   const totalCards = gameState.drawPileCount;
   const kittens = gameState.explodingKittensCount ?? 0;
+  const isAnyExploding = !!gameState.waitingForDefuse;
   // Don't round, so it moves physically on every single draw
-  const kittenPercent = totalCards > 0 ? (kittens / totalCards) * 100 : 0;
+  const basePercent = totalCards > 0 ? (kittens / totalCards) * 100 : 0;
+  const kittenPercent = isAnyExploding ? 100 : basePercent;
   
   // Map actual chance to visual gauge: 0-33% actual chance maps to 0-75% visual width (Green/Yellow/Orange).
   // >33% maps to 75-100% (Red Alert zone).
