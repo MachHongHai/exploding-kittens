@@ -384,7 +384,7 @@ export class AIBotController {
       
       const remainingDrawsAfterDefuse = player.turnsToPlay - 1;
       if (remainingDrawsAfterDefuse > 0) {
-        const neededDepth = remainingDrawsAfterDefuse + 1;
+        const neededDepth = remainingDrawsAfterDefuse; // Exactly at the depth to hit the next player
         const maxDepth = this.game.drawPile.length;
         // Place bomb past our remaining draws, or at bottom if deck is too small
         const safeDepth = Math.min(neededDepth, maxDepth);
@@ -591,11 +591,17 @@ export class AIBotController {
       .map(([name, count]) => `${name} (Attacked/Noped you ${count} times)`)
       .join(', ') || 'None';
 
+    const bombInRangeIndex = player.knownDeckTop.findIndex((c: any, idx: number) => 
+      c.cardType === CardType.EXPLODING_KITTEN && idx < player.turnsToPlay
+    );
+    const isBombDanger = bombInRangeIndex !== -1 || this.game.drawPile.length <= player.turnsToPlay;
+
     const gameStateDesc = `
     - Draw pile size: ${this.game.drawPile.length}
     - Discard pile top card: ${this.game.discardPile.length > 0 ? this.game.discardPile[this.game.discardPile.length - 1].name : 'Empty'}
     - Your turns to play: ${player.turnsToPlay}
     - Requires Defuse right now?: ${requiresDefuse ? 'YES' : 'NO'}
+    - BOMB DANGER ALERT: ${isBombDanger ? `CRITICAL! An Exploding Kitten is at Position ${bombInRangeIndex} (within your draw range). YOU MUST NOT DRAW! Play Skip, Attack, Shuffle, or steal an escape card!` : 'None. Top cards are either unknown or safe.'}
     - Cards you know at the top of the draw pile (from top to bottom):
 ${knownTop}
     - Recent Action History (last 10 moves):

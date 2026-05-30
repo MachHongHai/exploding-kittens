@@ -30,22 +30,23 @@ IMPORTANT RULES:
 
 ADVANCED TACTICAL INSIGHTS & TRICKS:
 1. SAFE DRAW (SAVE YOUR CARDS): Pay extreme attention to the "Cards you know at the top of the draw pile". If you KNOW the top card is safe (not an Exploding Kitten), NEVER play Skip, Attack, or Shuffle. Simply choose DRAW_CARD to hoard your valuable defense cards.
-2. BOMB DANGER AVOIDANCE: If you know an Exploding Kitten is within your draw range (e.g. you have 1 turn to play and the bomb is at index 0, or 2 turns and it's at index 0 or 1), you MUST play defense:
-   - Priority 1: ATTACK (ends turn, forces next player to take 2 turns). Best if the next player has no Defuse!
+2. CRITICAL BOMB DANGER AVOIDANCE: If the state says "BOMB DANGER ALERT: CRITICAL!", it means drawing a card will kill you. YOU MUST ABSOLUTELY NOT CHOOSE 'DRAW_CARD' UNLESS YOU HAVE ZERO PLAYABLE COMBO OR ACTION CARDS. 
+   - Priority 1: ATTACK (ends turn, forces next player to take 2 turns).
    - Priority 2: SKIP (ends 1 turn without drawing).
    - Priority 3: SHUFFLE (randomizes the deck to hopefully move the bomb).
+   - Priority 4 (Desperation): Play a Pair or 3-of-a-Kind combo to steal a card from an opponent, praying you steal a Skip or Attack.
 3. STEALING (FAVOR, PAIRS & THREE OF A KIND):
    - Pairs (2 cards of exactly the same type): Play to steal a random card from a target opponent.
-   - Three of a Kind (3 cards of exactly the same type): Play to request a SPECIFIC card type from a target opponent. You MUST set "requestedCardType" to the card type you want (e.g. "DEFUSE" to steal a player's Defuse card, which is highly recommended).
+   - Three of a Kind (3 cards of exactly the same type): Play to request a SPECIFIC card type from a target opponent. You MUST set "requestedCardType" to the card type you want (e.g. "DEFUSE" or "ATTACK").
 4. REVENGE & TARGET SELECTION:
-   - Look at the "Hostility & Revenge" list. If an opponent recently attacked you (stole your card, played Favor, or Noped your card), prioritize targeting them for your steals (Pairs, Triplets, Favors) to retaliate and disable their strategy.
-   - Otherwise, target players with large hands or players holding a Defuse card.
+   - Look at the "Hostility & Revenge" list. If an opponent recently attacked you, prioritize targeting them for your steals to retaliate.
 5. STRICT CONSERVATION OF DEFUSE & NOPE CARDS:
    - NEVER play DEFUSE or NOPE cards in a 2-card (Pair) or 3-card (Three of a Kind) combo under normal conditions. They are far too valuable as survival tools.
-   - EXCEPTION (DESPERATION MODE): If you are about to draw a known bomb (or if the draw pile has exactly 1 card left), have NO Defuse card left to save you, and have NO individual escape cards (Skip/Attack), you are in desperation. NOTE: If the draw pile has exactly 1 card left, NEVER play 'Shuffle' or 'See The Future' as single cards (they are completely useless). Instead, you MUST use any combination of cards (including pairs of Shuffles, pairs of See The Futures, or even Defuses/Nopes) as a Pair or 3-of-a-kind combo as a desperate attempt to steal an escape card from an opponent!
-6. SMART DEFUSING: If you draw a bomb, you must choose 'action': 'DEFUSE'.
-   - Check the next player's status! If the next player HAS NO DEFUSE card, insert the bomb at index 0 (top of the deck) to eliminate them instantly.
-   - If the next player HAS a Defuse card, insert the bomb deeper (e.g., index 2 or 3) to stall for time and keep yourself safe on your next turns.
+   - EXCEPTION: If you are in CRITICAL BOMB DANGER and have absolutely no other cards to form a combo, you may sacrifice them as a pair to try and steal an escape card.
+6. SMART DEFUSING: If you draw a bomb, you must choose 'action': 'DEFUSE' and provide an 'insertIndex'.
+   - CRITICAL: Check your own "Your turns to play". If you still have more turns to play (e.g., you were attacked), you MUST set "insertIndex" to be AT LEAST your remaining turns, otherwise you will draw the bomb yourself! (e.g., if you have 1 turn left after defusing, insertIndex must be 1 to hit the next player).
+   - If you have 0 turns left after defusing (normal play), check the next player's status! If they HAVE NO DEFUSE, insert the bomb at index 0 (top of the deck) to eliminate them instantly.
+   - If they have a Defuse, insert the bomb deeper (e.g., index 2 or 3) to stall for time.
 
 CURRENT GAME STATE:
 ${gameStateDescription}
