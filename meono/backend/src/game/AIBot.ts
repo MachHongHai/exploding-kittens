@@ -1,6 +1,7 @@
 import { Game } from './Game.js';
 import { askAIForMove, BotDecision } from '../services/ai-service.js';
 import { CardType, PlayerAction } from '../../../shared/src/types.js';
+import { ImplodingKittensBotLogic } from './expansions/ImplodingKittensBotLogic.js';
 
 export class AIBotController {
   private game: Game;
@@ -23,6 +24,11 @@ export class AIBotController {
     if (this.game.waitingForFavor?.victimId === botId) {
       const weakestCardId = this.chooseWeakestCard(player.hand);
       return { type: 'GIVE_CARD', requesterId: this.game.waitingForFavor.requesterId, cardId: weakestCardId };
+    }
+
+    if (this.game.playerAlteringFuture === botId) {
+      const decision = ImplodingKittensBotLogic.handleBotAlteringFuture(botId, this.game);
+      if (decision) return decision;
     }
 
     if (difficulty === 'PLAY_WITH_GEMINI') {
@@ -67,18 +73,33 @@ export class AIBotController {
     allowValuable: boolean
   ): string | null {
     // Cat Cards are the ONLY cards that should be used as combos under normal circumstances.
-    // Their sole purpose IS to be played as pairs/triplets. Action cards are always more valuable
-    // for their effects (Skip, Attack, etc.) than as combo fodder.
     const catTypes = Object.keys(counts).filter(type => type.startsWith('CAT_CARD') && counts[type].length >= minCount);
     if (catTypes.length > 0) return catTypes[0];
 
-    // Only in absolute desperation (bomb imminent, no escape, no defuse) do we sacrifice action cards as combos.
-    // This is a Hail Mary play - the bot is about to die and has nothing else to try.
+    // Feral Cat wildcard: combine FERAL_CAT with any lone cat card to form pairs/triplets
+    const feralCount = counts[CardType.FERAL_CAT]?.length || 0;
+    if (feralCount > 0) {
+      // Try to pair feral with a cat card that has (minCount - feralCount) or more
+      for (const type of Object.keys(counts)) {
+        if (!type.startsWith('CAT_CARD')) continue;
+        const combined = counts[type].length + feralCount;
+        if (combined >= minCount) {
+          // Return a special marker; we'll handle the card selection in the caller
+          return `FERAL_COMBO:${type}`;
+        }
+      }
+      // Two or more ferals can also form a combo by themselves
+      if (feralCount >= minCount) {
+        return CardType.FERAL_CAT;
+      }
+    }
+
+    // Only in absolute desperation do we sacrifice action cards as combos.
     if (allowValuable) {
       const desperateTypes = Object.keys(counts).filter(type => {
         if (counts[type].length < minCount) return false;
         if (type.startsWith('CAT_CARD')) return false;
-        // Even in desperation, NEVER sacrifice Defuse or Nope
+        if (type === CardType.FERAL_CAT) return false;
         if (type === CardType.DEFUSE || type === CardType.NOPE) return false;
         return true;
       });
@@ -131,20 +152,46 @@ export class AIBotController {
     const player = this.game.players.find(p => p.id === botId)!;
     const hand = player.hand;
     const isBombOnTop = player.knownDeckTop.length > 0 &&
-                        player.knownDeckTop[0].cardType === CardType.EXPLODING_KITTEN;
+                        (player.knownDeckTop[0].cardType === CardType.EXPLODING_KITTEN ||
+                         player.knownDeckTop[0].cardType === CardType.IMPLODING_KITTEN);
 
-    if (!isBombOnTop) return null; // Only engage if bomb is CONFIRMED on top
+    if (!isBombOnTop) return null;
 
-    // Re-scan hand for ANY escape/utility card (the bot may have stolen one via a combo!)
+    // Expansion cards: try Reverse, Draw From Bottom, Targeted Attack, Alter The Future
+    const reverse = hand.find(c => c.type === CardType.REVERSE);
+    if (reverse) {
+      console.log(`[Expert SAFETY] ${player.name}: Using Reverse to avoid bomb!`);
+      return { type: 'PLAY_CARDS', cardIds: [reverse.id] };
+    }
+
+    const drawBottom = hand.find(c => c.type === CardType.DRAW_FROM_THE_BOTTOM);
+    if (drawBottom) {
+      console.log(`[Expert SAFETY] ${player.name}: Using Draw From Bottom to avoid top bomb!`);
+      return { type: 'PLAY_CARDS', cardIds: [drawBottom.id] };
+    }
+
+    const targetedAttack = hand.find(c => c.type === CardType.TARGETED_ATTACK);
+    if (targetedAttack) {
+      console.log(`[Expert SAFETY] ${player.name}: Using Targeted Attack to avoid drawing!`);
+      return { type: 'PLAY_CARDS', cardIds: [targetedAttack.id] };
+    }
+
+    const alterFuture = hand.find(c => c.type === CardType.ALTER_THE_FUTURE_3X);
+    if (alterFuture) {
+      console.log(`[Expert SAFETY] ${player.name}: Using Alter The Future to rearrange bomb!`);
+      return { type: 'PLAY_CARDS', cardIds: [alterFuture.id] };
+    }
+
+    // Standard escape cards
     const attack = hand.find(c => c.type === CardType.ATTACK);
     if (attack) {
-      console.log(`[Expert SAFETY] ${player.name}: Found stolen Attack! Using it to escape bomb.`);
+      console.log(`[Expert SAFETY] ${player.name}: Found Attack! Using it to escape bomb.`);
       return { type: 'PLAY_CARDS', cardIds: [attack.id] };
     }
 
     const skip = hand.find(c => c.type === CardType.SKIP);
     if (skip) {
-      console.log(`[Expert SAFETY] ${player.name}: Found stolen Skip! Using it to dodge bomb.`);
+      console.log(`[Expert SAFETY] ${player.name}: Found Skip! Using it to dodge bomb.`);
       return { type: 'PLAY_CARDS', cardIds: [skip.id] };
     }
 
@@ -162,20 +209,19 @@ export class AIBotController {
     });
     const target = this.selectStrategicTarget(botId);
     if (target && target.handCount > 0) {
-      // Try triplet (including action cards as desperate combo fodder)
       const tripletType = this.getValidComboType(counts, 3, true);
       if (tripletType) {
+        const cardIds = this.resolveComboCardIds(tripletType, counts, 3);
         const requestedType = this.getBestCardTypeToRequest(target, CardType.ATTACK);
         console.log(`[Expert SAFETY] ${player.name}: Last resort 3-of-a-kind for ${requestedType} from ${target.name}!`);
-        return { type: 'PLAY_CARDS', cardIds: counts[tripletType].slice(0, 3), targetId: target.id, requestedCardType: requestedType as any };
+        return { type: 'PLAY_CARDS', cardIds, targetId: target.id, requestedCardType: requestedType as any };
       }
-      // Try pair
       const pairType = this.getValidComboType(counts, 2, true);
       if (pairType) {
+        const cardIds = this.resolveComboCardIds(pairType, counts, 2);
         console.log(`[Expert SAFETY] ${player.name}: Last resort pair steal from ${target.name}!`);
-        return { type: 'PLAY_CARDS', cardIds: counts[pairType].slice(0, 2), targetId: target.id };
+        return { type: 'PLAY_CARDS', cardIds, targetId: target.id };
       }
-      // Try favor
       const favor = hand.find(c => c.type === CardType.FAVOR);
       if (favor) {
         console.log(`[Expert SAFETY] ${player.name}: Last resort Favor on ${target.name}!`);
@@ -183,14 +229,28 @@ export class AIBotController {
       }
     }
 
-    // Try See The Future (won't save us, but buys info for next turn — better than nothing)
     const stf = hand.find(c => c.type === CardType.SEE_THE_FUTURE);
     if (stf && this.game.drawPile.length > 1) {
       console.log(`[Expert SAFETY] ${player.name}: Playing See The Future as stall tactic.`);
       return { type: 'PLAY_CARDS', cardIds: [stf.id] };
     }
 
-    return null; // Truly nothing left
+    return null;
+  }
+
+  // Helper: resolve card IDs for combo types, handling FERAL_COMBO markers
+  private resolveComboCardIds(comboType: string, counts: Record<string, string[]>, count: number): string[] {
+    if (comboType.startsWith('FERAL_COMBO:')) {
+      const actualType = comboType.split(':')[1];
+      const catIds = counts[actualType] || [];
+      const feralIds = counts[CardType.FERAL_CAT] || [];
+      const result: string[] = [];
+      // Take as many cat cards as we can, fill rest with ferals
+      for (const id of catIds) { if (result.length < count) result.push(id); }
+      for (const id of feralIds) { if (result.length < count) result.push(id); }
+      return result;
+    }
+    return (counts[comboType] || []).slice(0, count);
   }
 
   private getRevengeScore(botId: string, targetId: string): number {
@@ -464,8 +524,9 @@ export class AIBotController {
         });
         const pairType = this.getValidComboType(counts, 2, true); // Allow valuable cards in desperation
         if (pairType) {
+          const cardIds = this.resolveComboCardIds(pairType, counts, 2);
           console.log(`[AIBot - Medium] DESPERATE Pair on ${target.name} to steal defense under bomb danger.`);
-          return { type: 'PLAY_CARDS', cardIds: counts[pairType].slice(0, 2), targetId: target.id };
+          return { type: 'PLAY_CARDS', cardIds, targetId: target.id };
         }
       }
     }
@@ -495,15 +556,17 @@ export class AIBotController {
       if (tripletType) {
         const preferred = player.hasDefuse() ? CardType.ATTACK : CardType.DEFUSE;
         const requestedType = this.getBestCardTypeToRequest(target, preferred);
+        const cardIds = this.resolveComboCardIds(tripletType, counts, 3);
         console.log(`[AIBot - Medium] Playing 3-of-a-kind requesting ${requestedType} from ${target.name}.`);
-        return { type: 'PLAY_CARDS', cardIds: counts[tripletType].slice(0, 3), targetId: target.id, requestedCardType: requestedType as any };
+        return { type: 'PLAY_CARDS', cardIds, targetId: target.id, requestedCardType: requestedType as any };
       }
 
       // Pairs
       const pairType = this.getValidComboType(counts, 2, false);
       if (pairType && Math.random() > 0.5) {
+        const cardIds = this.resolveComboCardIds(pairType, counts, 2);
         console.log(`[AIBot - Medium] Playing Pair on ${target.name}.`);
-        return { type: 'PLAY_CARDS', cardIds: counts[pairType].slice(0, 2), targetId: target.id };
+        return { type: 'PLAY_CARDS', cardIds, targetId: target.id };
       }
 
       // Favor
@@ -680,8 +743,8 @@ ${historyDesc}
         return null;
       }
 
-      // 2. Attack / Skip: Counter-nope to protect our turn-ending actions
-      if (cardType === CardType.ATTACK || cardType === CardType.SKIP) {
+      // 2. Attack / Skip / Targeted Attack: Counter-nope to protect our turn-ending actions
+      if (cardType === CardType.ATTACK || cardType === CardType.TARGETED_ATTACK || cardType === CardType.SKIP || cardType === CardType.DRAW_FROM_THE_BOTTOM) {
         const inDanger = isTopCardBomb || (!hasDefuse && deckSize <= lateGameThreshold);
         if (inDanger || Math.random() < 0.5) {
           console.log(`[AIBot - Nope] Bot ${player.name} counter-nopes to save itself from drawing (Action: ${cardType}).`);
@@ -741,8 +804,8 @@ ${historyDesc}
     }
 
     // 2. Pro Gamer Move: If the top card of the deck is a known bomb, and the current active player
-    // tries to play SKIP or ATTACK to avoid bosing it, we ALWAYS Nope them to force them to draw the bomb!
-    if (isTopCardBomb && (cardType === CardType.SKIP || cardType === CardType.ATTACK)) {
+    // tries to play SKIP, ATTACK, TARGETED_ATTACK, REVERSE, or DRAW_FROM_THE_BOTTOM to avoid drawing it, we ALWAYS Nope them to force them to draw the bomb!
+    if (isTopCardBomb && (cardType === CardType.SKIP || cardType === CardType.ATTACK || cardType === CardType.TARGETED_ATTACK || cardType === CardType.REVERSE || cardType === CardType.DRAW_FROM_THE_BOTTOM)) {
       const activePlayer = this.game.players.find(p => p.id === action.playerId);
       // Ensure the active player is the one whose turn it is to draw (turnsToPlay > 0)
       if (activePlayer && activePlayer.turnsToPlay > 0 && activePlayer.id === this.game.getCurrentPlayer()?.id) {
@@ -781,29 +844,37 @@ ${historyDesc}
       return null;
     }
 
-    // 4. If opponent plays Attack targeting us (or we are next in turn order):
-    if (cardType === CardType.ATTACK) {
-      // Determine if we are the victim of the attack
-      let nextIndex = (this.game.currentPlayerIndex + 1) % this.game.players.length;
-      while (this.game.players[nextIndex].isEliminated) {
-        nextIndex = (nextIndex + 1) % this.game.players.length;
-      }
-      const nextPlayerId = this.game.players[nextIndex].id;
+    // 4. If opponent plays Attack or Targeted Attack (Targeted Attack's target is chosen AFTER Nope window, so everyone must be cautious):
+    if (cardType === CardType.ATTACK || cardType === CardType.TARGETED_ATTACK) {
+      let isTargetedOrNext = false;
 
-      if (nextPlayerId === botId || action.targetId === botId) {
-        // Early game optimization: If we have a Defuse, never Nope the Attack.
-        // If we don't have a Defuse, only Nope with 20% probability (save Nope for later when bomb is more likely)
+      if (cardType === CardType.ATTACK) {
+        // Determine if we are the victim of the attack
+        let nextIndex = (this.game.currentPlayerIndex + 1) % this.game.players.length;
+        while (this.game.players[nextIndex].isEliminated) {
+          nextIndex = (nextIndex + 1) % this.game.players.length;
+        }
+        isTargetedOrNext = (this.game.players[nextIndex].id === botId);
+      } else {
+        // For TARGETED_ATTACK, anyone could be the target (except the player who played it).
+        // It's a game of chicken. If the bot is in danger, they might Nope it out of fear.
+        isTargetedOrNext = true;
+      }
+
+      if (isTargetedOrNext) {
         if (isEarlyGame) {
-          if (!hasDefuse && Math.random() < 0.20) {
-            console.log(`[AIBot - Nope] Bot ${player.name} Nopes Attack in early game due to no Defuse (Desperate).`);
+          if (!hasDefuse && Math.random() < (cardType === CardType.TARGETED_ATTACK ? 0.10 : 0.20)) {
+            console.log(`[AIBot - Nope] Bot ${player.name} Nopes ${cardType} in early game due to no Defuse (Desperate fear).`);
             return { type: 'PLAY_NOPE', cardId: nopeCard.id };
           }
           return null;
         }
 
-        // Nope the Attack only if we are in danger (no Defuse or deck is late game)
         if (!hasDefuse || deckSize <= lateGameThreshold) {
-          console.log(`[AIBot - Nope] Bot ${player.name} Nopes Attack from opponent due to danger.`);
+          // If Targeted Attack, only Nope if really scared (since another player might be the target)
+          if (cardType === CardType.TARGETED_ATTACK && Math.random() > 0.4 && hasDefuse) return null;
+          
+          console.log(`[AIBot - Nope] Bot ${player.name} Nopes ${cardType} from opponent due to danger.`);
           return { type: 'PLAY_NOPE', cardId: nopeCard.id };
         }
       }

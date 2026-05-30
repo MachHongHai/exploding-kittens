@@ -1,5 +1,7 @@
 import { Card, CardType, GameState, PlayerState } from '../../../shared/src/types.js';
-import { Player, createDeck, generateCardId, shuffleDeck } from './models.js';
+import { Player, generateCardId, shuffleDeck } from './models.js';
+import { createDeckFactory } from './decks/DeckFactory.js';
+import { ImplodingKittensGameLogic } from './expansions/ImplodingKittensGameLogic.js';
 
 export class Game {
   public id: string;
@@ -11,6 +13,9 @@ export class Game {
   private _lastAction: string | null = null;
   public actionHistory: string[] = [];
   public initialDrawPileCount: number = 0;
+  public deckType: 'ORIGINAL' | 'IMPLODING_KITTENS';
+  public playDirection: 1 | -1 = 1;
+  public waitingForImplodingInsert: string | null = null;
 
   get lastAction(): string | null {
     return this._lastAction;
@@ -33,9 +38,11 @@ export class Game {
   public waitingForDefuse: string | null = null;
   public waitingForSteal: { stealerId: string; victimId: string; count: number; expiresAt: number } | null = null;
   public waitingForFavor: { requesterId: string; victimId: string; expiresAt: number } | null = null;
-  public waitingForTarget: { type: 'FAVOR' | '2-CARD' | '3-CARD'; playerId: string; cardIds: string[]; expiresAt: number } | null = null;
+  public waitingForTarget: { type: 'FAVOR' | '2-CARD' | '3-CARD' | 'TARGETED_ATTACK'; playerId: string; cardIds: string[]; expiresAt: number } | null = null;
   public lastTheft: { stealerId: string; victimId: string; cardId?: string } | null = null;
   public playerSeeingFuture: string | null = null;
+  public playerAlteringFuture: string | null = null;
+  public alteringFutureCards: Card[] = [];
   public pendingAction: {
     actionId: string;
     playerId: string;
@@ -68,8 +75,9 @@ export class Game {
     };
   } | null = null;
 
-  constructor(id: string) {
+  constructor(id: string, deckType: 'ORIGINAL' | 'IMPLODING_KITTENS' = 'ORIGINAL') {
     this.id = id;
+    this.deckType = deckType;
   }
 
   addPlayer(player: Player) {
@@ -83,10 +91,10 @@ export class Game {
     this.currentPlayerIndex = 0;
     this.turnExpiresAt = Date.now() + 15000;
 
-    // 1. Create base deck
-    this.drawPile = createDeck(this.players.length);
+    // Create the deck based on deckType
+    this.drawPile = createDeckFactory(this.deckType, this.players.length);
 
-    // 2. Deal 1 Defuse and 7 normal cards to each player
+    // 2. Deal 1 Defuse and 7 normal cards to each player (total 8 cards)
     this.players.forEach(player => {
       player.hand = [];
       player.turnsToPlay = 1;
@@ -107,8 +115,12 @@ export class Game {
       }
     });
 
-    // 3. Insert Exploding Kittens (totalPlayers - 1) and remaining Defuses
-    const bombCount = this.players.length - 1;
+    // 3. Insert Exploding Kittens and remaining Defuses
+    // According to Exploding Kittens mobile version: total bombs is (playerCount - 1).
+    // In the Imploding Kittens deck, 1 Imploding Kitten is already inside the draw pile.
+    // So we add (playerCount - 2) Exploding Kittens.
+    const isImploding = this.deckType === 'IMPLODING_KITTENS';
+    const bombCount = isImploding ? Math.max(0, this.players.length - 2) : Math.max(0, this.players.length - 1);
     for (let i = 0; i < bombCount; i++) {
       this.drawPile.push({
         id: generateCardId(),
@@ -129,15 +141,30 @@ export class Game {
       });
     }
 
-    // If 1v1 (2 players), limit the draw pile to exactly 14 cards (1 kitten + 2 defuses + 11 other cards)
-    if (this.players.length === 2) {
-      const kittens = this.drawPile.filter(c => c.type === CardType.EXPLODING_KITTEN);
-      const defuses = this.drawPile.filter(c => c.type === CardType.DEFUSE);
-      const others = this.drawPile.filter(c => c.type !== CardType.EXPLODING_KITTEN && c.type !== CardType.DEFUSE);
+    // Limit the draw pile size based on player count to match the mobile version standard (applies to both ORIGINAL and IMPLODING_KITTENS)
+    const targetDrawPileSizes: Record<number, number> = {
+      2: 14,
+      3: 17,
+      4: 20,
+      5: 24,
+      6: 28
+    };
+    const targetSize = targetDrawPileSizes[this.players.length] || 24;
 
-      const selectedOthers = shuffleDeck(others).slice(0, 11);
-      this.drawPile = [...kittens, ...defuses, ...selectedOthers];
-    }
+    const explodingKittens = this.drawPile.filter(c => c.type === CardType.EXPLODING_KITTEN);
+    const implodingKittens = this.drawPile.filter(c => c.type === CardType.IMPLODING_KITTEN);
+    const defuses = this.drawPile.filter(c => c.type === CardType.DEFUSE);
+    const others = this.drawPile.filter(
+      c => c.type !== CardType.EXPLODING_KITTEN && 
+           c.type !== CardType.IMPLODING_KITTEN && 
+           c.type !== CardType.DEFUSE
+    );
+
+    const bombAndDefuseCount = explodingKittens.length + implodingKittens.length + defuses.length;
+    const othersNeeded = Math.max(0, targetSize - bombAndDefuseCount);
+
+    const selectedOthers = shuffleDeck(others).slice(0, othersNeeded);
+    this.drawPile = [...explodingKittens, ...implodingKittens, ...defuses, ...selectedOthers];
 
     // 4. Final shuffle
     this.drawPile = shuffleDeck(this.drawPile);
@@ -149,15 +176,16 @@ export class Game {
   }
 
   nextTurn() {
-    let nextIndex = (this.currentPlayerIndex + 1) % this.players.length;
+    let nextIndex = this.currentPlayerIndex;
     this.lastTheft = null;
     this.waitingForSteal = null;
     this.waitingForFavor = null;
     this.playerSeeingFuture = null;
 
-    while (this.players[nextIndex].isEliminated) {
-      nextIndex = (nextIndex + 1) % this.players.length;
-    }
+    // Move in the current play direction
+    do {
+      nextIndex = (nextIndex + this.playDirection + this.players.length) % this.players.length;
+    } while (this.players[nextIndex].isEliminated);
 
     this.currentPlayerIndex = nextIndex;
     this.getCurrentPlayer().turnsToPlay = 1;
@@ -196,9 +224,9 @@ export class Game {
 
     if (cards.length === 1) {
       const card = cards[0];
-      if (card.type.startsWith('CAT_CARD')) return { success: false, message: "Cat cards must be played in pairs!" };
+      if (card.type.startsWith('CAT_CARD') || card.type === CardType.FERAL_CAT) return { success: false, message: "Cat cards must be played in pairs!" };
       if (card.type === CardType.NOPE) return { success: false, message: "Nope cards must be played during an Action Window!" };
-      if (card.type === CardType.DEFUSE || card.type === CardType.EXPLODING_KITTEN) return { success: false, message: "Cannot play this card normally!" };
+      if (card.type === CardType.DEFUSE || card.type === CardType.EXPLODING_KITTEN || card.type === CardType.IMPLODING_KITTEN) return { success: false, message: "Cannot play this card normally!" };
 
       if (card.type === CardType.FAVOR && !targetId) {
         cards.forEach(c => player.removeCard(c.id) && this.discardPile.push(c));
@@ -233,7 +261,16 @@ export class Game {
     }
 
     if (cards.length === 2) {
-      if (!isSameType) return { success: false, message: "Must be same type" };
+      // Feral Cat combo validation: Feral Cat can substitute for any Cat Card
+      const isCatOrFeral = (type: string) => type.startsWith('CAT_CARD') || type === CardType.FERAL_CAT;
+      const allCatOrFeral = cards.every(c => isCatOrFeral(c.type));
+      if (!allCatOrFeral && !isSameType) return { success: false, message: "Must be same type or Cat + Feral Cat" };
+      if (allCatOrFeral) {
+        // Valid: two cats (same type, or one feral + one cat)
+        // But two ferals alone is also valid
+      } else if (!isSameType) {
+        return { success: false, message: "Must be same type" };
+      }
       if (!targetId) {
         cards.forEach(c => player.removeCard(c.id) && this.discardPile.push(c));
         this.lastAction = `${player.name} played a Pair!`;
@@ -265,7 +302,18 @@ export class Game {
     }
 
     if (cards.length === 3) {
-      if (!isSameType) return { success: false, message: "Must be same type" };
+      const isCatOrFeral = (type: string) => type.startsWith('CAT_CARD') || type === CardType.FERAL_CAT;
+      const allCatOrFeral = cards.every(c => isCatOrFeral(c.type));
+      if (!allCatOrFeral && !isSameType) return { success: false, message: "Must be same type or Cat + Feral Cat" };
+      if (allCatOrFeral) {
+        // Valid three-of-a-kind with feral wildcards
+        // All cat cards should be the same type (ignoring ferals)
+        const nonFeralTypes = cards.filter(c => c.type !== CardType.FERAL_CAT).map(c => c.type);
+        const uniqueNonFeral = [...new Set(nonFeralTypes)];
+        if (uniqueNonFeral.length > 1) return { success: false, message: "Cat cards in a 3-of-a-kind must all be the same type (Feral Cat substitutes for one type)" };
+      } else if (!isSameType) {
+        return { success: false, message: "Must be same type" };
+      }
       if (!targetId) {
         cards.forEach(c => player.removeCard(c.id) && this.discardPile.push(c));
         this.lastAction = `${player.name} played 3 of a Kind!`;
@@ -595,6 +643,35 @@ export class Game {
             this.playerSeeingFuture = player.id;
           }
           break;
+        case CardType.ALTER_THE_FUTURE_3X:
+          if (this.deckType === 'IMPLODING_KITTENS') {
+            ImplodingKittensGameLogic.handleAlterFuture3x(this, player);
+          }
+          break;
+        case CardType.DRAW_FROM_THE_BOTTOM:
+          if (this.deckType === 'IMPLODING_KITTENS') {
+            ImplodingKittensGameLogic.handleDrawFromBottom(this, player);
+          }
+          break;
+        case CardType.REVERSE:
+          if (this.deckType === 'IMPLODING_KITTENS') {
+            ImplodingKittensGameLogic.handleReverse(this, player);
+          }
+          break;
+        case CardType.TARGETED_ATTACK:
+          if (this.deckType === 'IMPLODING_KITTENS') {
+            // Put into target selection mode (player picks who to attack)
+            this.waitingForTarget = {
+              type: 'TARGETED_ATTACK',
+              playerId: player.id,
+              cardIds: action.cards.map(c => c.id),
+              expiresAt: Date.now() + 12500
+            };
+            this.lastAction = `${player.name} played Targeted Attack! Choose a target...`;
+            // Don't resolve yet — wait for SELECT_TARGET
+            return;
+          }
+          break;
         case CardType.FAVOR:
           const target = this.players.find(p => p.id === action.targetId);
           if (target && target.handCount > 0) {
@@ -743,6 +820,21 @@ export class Game {
       this.eliminatePlayer(player.id);
       return 'EXPLODED';
     }
+
+    // Imploding Kitten logic
+    if (card.type === CardType.IMPLODING_KITTEN) {
+      if (card.isFaceUp) {
+        // Face-up: instant death, cannot be defused
+        this.lastAction = `${player.name} drew the face-up Imploding Kitten and is eliminated!`;
+        this.eliminatePlayer(player.id);
+        return 'EXPLODED';
+      } else {
+        // Face-down: player must re-insert it face-up (like defuse but free)
+        this.lastAction = `${player.name} drew the Imploding Kitten! Must place it back face-up.`;
+        this.waitingForImplodingInsert = player.id;
+        return 'DEFUSE_REQUIRED';
+      }
+    }
     player.drawCard(card);
     this.lastAction = `${player.name} drew a card.`;
 
@@ -795,6 +887,79 @@ export class Game {
     return true;
   }
 
+  insertImplodingKitten(playerId: string, insertIndex: number): boolean {
+    const player = this.players.find(p => p.id === playerId);
+    if (!player || this.waitingForImplodingInsert !== playerId) return false;
+
+    const pos = Math.max(0, Math.min(insertIndex, this.drawPile.length));
+    this.drawPile.splice(this.drawPile.length - pos, 0, {
+      id: generateCardId(),
+      type: CardType.IMPLODING_KITTEN,
+      name: 'Imploding Kitten',
+      description: 'When drawn face up, explode immediately!',
+      isFaceUp: true
+    });
+
+    // The inserting player remembers where they put it
+    while (player.knownDeckTop.length < pos) {
+      player.knownDeckTop.push({ cardType: 'UNKNOWN', cardName: 'Unknown Card' });
+    }
+    player.knownDeckTop.splice(pos, 0, { cardType: CardType.IMPLODING_KITTEN, cardName: 'Imploding Kitten (Face Up)' });
+
+    // Invalidate other players' memories
+    this.players.forEach(p => {
+      if (p.id !== player.id) {
+        p.knownDeckTop = [];
+      }
+    });
+
+    this.lastAction = `${player.name} placed the Imploding Kitten back face-up.`;
+    this.waitingForImplodingInsert = null;
+    if (--player.turnsToPlay <= 0) this.nextTurn();
+    return true;
+  }
+
+  drawFromBottom(playerId: string): 'SAFE' | 'EXPLODED' | 'DEFUSE_REQUIRED' {
+    if (this.status !== 'PLAYING' || this.waitingForDefuse || this.waitingForImplodingInsert) return 'SAFE';
+    const player = this.getCurrentPlayer();
+    if (player.id !== playerId) return 'SAFE';
+
+    this.lastTheft = null;
+    this.lastNopeableAction = null;
+    const card = this.drawPile.shift(); // Draw from bottom!
+    if (!card) return 'SAFE';
+
+    // Bottom draw doesn't affect knownDeckTop (those track the top)
+
+    if (card.type === CardType.EXPLODING_KITTEN) {
+      this.lastAction = `${player.name} drew an Exploding Kitten from the bottom!`;
+      this.lastDefuseAction = null;
+      if (player.hasDefuse()) {
+        this.waitingForDefuse = player.id;
+        return 'DEFUSE_REQUIRED';
+      }
+      this.eliminatePlayer(player.id);
+      return 'EXPLODED';
+    }
+
+    if (card.type === CardType.IMPLODING_KITTEN) {
+      if (card.isFaceUp) {
+        this.lastAction = `${player.name} drew the face-up Imploding Kitten from the bottom and is eliminated!`;
+        this.eliminatePlayer(player.id);
+        return 'EXPLODED';
+      } else {
+        this.lastAction = `${player.name} drew the Imploding Kitten from the bottom! Must place it back face-up.`;
+        this.waitingForImplodingInsert = player.id;
+        return 'DEFUSE_REQUIRED';
+      }
+    }
+
+    player.drawCard(card);
+    this.lastAction = `${player.name} drew from the bottom.`;
+    if (--player.turnsToPlay <= 0) this.nextTurn();
+    return 'SAFE';
+  }
+
   selectTarget(playerId: string, targetId: string, requestedCardType?: CardType, isTimeout: boolean = false) {
     if (!this.waitingForTarget || this.waitingForTarget.playerId !== playerId) return;
 
@@ -804,6 +969,12 @@ export class Game {
 
     const { type, cardIds } = this.waitingForTarget;
     const cards = this.discardPile.filter(c => cardIds.includes(c.id));
+
+    // Handle TARGETED_ATTACK separately
+    if (type === 'TARGETED_ATTACK') {
+      ImplodingKittensGameLogic.resolveTargetedAttack(this, player, target);
+      return;
+    }
 
     const typeLabel = type === 'FAVOR' ? 'Favor' : type === '2-CARD' ? 'Pair' : '3 of a Kind';
     this.lastAction = `${player.name} targeted ${target.name} for ${typeLabel}${isTimeout ? ' (Timeout)' : ''}!`;
@@ -842,6 +1013,7 @@ export class Game {
   getStateForPlayer(playerId: string): GameState {
     return {
       status: this.status,
+      deckType: this.deckType,
       currentPlayerId: this.status === 'PLAYING' ? this.getCurrentPlayer()?.id : null,
       drawPileCount: this.drawPile.length,
       initialDrawPileCount: this.initialDrawPileCount,
@@ -852,6 +1024,7 @@ export class Game {
       winner: this.winner,
       turnExpiresAt: this.turnExpiresAt,
       waitingForDefuse: this.waitingForDefuse,
+      bombCountdown: this.bombCountdown,
       waitingForSteal: this.waitingForSteal || undefined,
       waitingForFavor: this.waitingForFavor || undefined,
       waitingForTarget: this.waitingForTarget ? {
@@ -861,7 +1034,10 @@ export class Game {
       } : undefined,
       lastTheft: this.lastTheft || undefined,
       lastNopeableAction: this.lastNopeableAction,
+      playDirection: this.playDirection,
+      waitingForImplodingInsert: this.waitingForImplodingInsert,
       futureCards: this.playerSeeingFuture === playerId ? this.drawPile.slice(-3).reverse() : undefined,
+      alteringFutureCards: this.playerAlteringFuture === playerId ? this.alteringFutureCards : undefined,
       actionWindow: this.pendingAction ? {
         actionId: this.pendingAction.actionId,
         actionName: this.pendingAction.actionName,

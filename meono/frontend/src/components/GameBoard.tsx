@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence, Reorder } from 'framer-motion';
 import { CardType } from '../../../shared/src/types';
-import type { GameState, PlayerAction } from '../../../shared/src/types';
+import type { GameState, PlayerAction, Card } from '../../../shared/src/types';
 import { CardView } from './CardView';
 import { CountdownOverlay } from './CountdownOverlay';
 import woodTabletop from '../assets/wood_tabletop.png';
@@ -32,12 +32,17 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
       const action = gameState.lastAction || '';
       const justPlayedCombo = action.includes('played a Pair!') || action.includes('played 3 of a Kind!');
       const justPlayedFavor = action.includes('played Favor!');
+      const justPlayedTargetedAttack = action.includes('played Targeted Attack') || action.includes('played Targeted Attack 2x');
 
       if (justPlayedCombo && !showTargetModal) {
         timer = setTimeout(() => {
           setShowTargetModal({ type: gameState.waitingForTarget!.type, cardIds: [] });
         }, 2500);
       } else if (justPlayedFavor && !showTargetModal) {
+        timer = setTimeout(() => {
+          setShowTargetModal({ type: gameState.waitingForTarget!.type, cardIds: [] });
+        }, 2000);
+      } else if (justPlayedTargetedAttack && !showTargetModal) {
         timer = setTimeout(() => {
           setShowTargetModal({ type: gameState.waitingForTarget!.type, cardIds: [] });
         }, 2000);
@@ -124,19 +129,39 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
       return;
     }
     
-    if (action.includes('targeted')) return; // Ignore target selection updates
+    const actionLower = action.toLowerCase();
 
-    if (action.includes('played Shuffle')) {
+    if (action.includes('Targeted Attack') || actionLower.includes('targeted attack')) {
+      setActionPopup({ text: 'TARGETED ATTACK!', color: 'from-red-600 via-orange-600 to-amber-600' });
+    } else if (actionLower.includes('pair')) {
+      setActionPopup({ text: 'PAIR!', color: 'from-yellow-400 to-amber-600' });
+    } else if (actionLower.includes('3 of a kind')) {
+      setActionPopup({ text: '3 OF A KIND!', color: 'from-orange-500 to-red-600' });
+    } else if (actionLower.includes('alter the future')) {
+      setActionPopup({ text: 'ALTER THE FUTURE!', color: 'from-fuchsia-500 via-purple-600 to-indigo-700' });
+    } else if (actionLower.includes('draw from the bottom')) {
+      setActionPopup({ text: 'DRAW BOTTOM!', color: 'from-teal-400 via-emerald-500 to-cyan-600' });
+    } else if (actionLower.includes('reverse') || actionLower.includes('reversed the turn order')) {
+      setActionPopup({ text: 'REVERSE!', color: 'from-cyan-400 via-blue-500 to-indigo-600' });
+    } else if (actionLower.includes('imploding kitten')) {
+      if (actionLower.includes('eliminated') || actionLower.includes('exploded') || actionLower.includes('explode')) {
+        setActionPopup({ text: 'KABOOM!', color: 'from-red-700 via-red-950 to-black' });
+      } else {
+        setActionPopup({ text: 'IMPLODING KITTEN!', color: 'from-rose-500 via-red-600 to-stone-800' });
+      }
+    } else if (action.includes('targeted')) {
+      return; // Ignore other target selection updates (e.g. Favor confirmation)
+    } else if (action.includes('played Shuffle')) {
       setActionPopup({ text: 'SHUFFLE!', color: 'from-orange-400 to-red-600' });
     } else if (action.includes('played Attack')) {
       setActionPopup({ text: 'ATTACK!', color: 'from-red-500 to-red-800' });
     } else if (action.includes('played Skip')) {
       setActionPopup({ text: 'SKIP!', color: 'from-blue-400 to-blue-700' });
-    } else if (action.includes('played See The Future')) {
+    } else if (action.includes('played See The Future') || action.includes('played See the Future')) {
       setActionPopup({ text: 'SEE THE FUTURE!', color: 'from-fuchsia-400 to-purple-700' });
     } else if (action.includes('played Favor')) {
       setActionPopup({ text: 'FAVOR!', color: 'from-amber-600 to-orange-800' });
-    } else if (action.includes('played Nope') || action.includes('NOPED')) {
+    } else if (action.includes('played Nope') || action.includes('NOPED') || action.includes('Noped')) {
       setActionPopup({ text: 'NOPE!', color: 'from-red-600 to-stone-900' });
     } else {
       return;
@@ -209,6 +234,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
   
   const isMyTurn = gameState.currentPlayerId === socketId && gameState.status === 'PLAYING';
   const isExploding = gameState.waitingForDefuse === socketId;
+  const isImplodingInsert = gameState.waitingForImplodingInsert === socketId;
   const hasDefuse = myPlayer?.hand?.some(c => c.type === CardType.DEFUSE);
 
   const [showYourTurn, setShowYourTurn] = useState(false);
@@ -244,13 +270,22 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
 
   // Reset defuse index when exploding state changes
   useEffect(() => {
-    if (isExploding) {
+    if (isExploding || isImplodingInsert) {
       setDefuseInsertIndex(0);
     }
-  }, [isExploding]);
+  }, [isExploding, isImplodingInsert]);
 
   // Future logic
   const isSeeingFuture = !!gameState.futureCards;
+  const isAlteringFuture = !!gameState.alteringFutureCards;
+  const [alteringCards, setAlteringCards] = useState<Card[]>([]);
+
+  // Sync state when entering alter future mode
+  useEffect(() => {
+    if (isAlteringFuture && gameState.alteringFutureCards) {
+      setAlteringCards(gameState.alteringFutureCards);
+    }
+  }, [isAlteringFuture, gameState.alteringFutureCards]);
 
   // Auto-close See The Future after 3 seconds
   useEffect(() => {
@@ -301,6 +336,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
     !gameState.waitingForSteal &&
     !gameState.waitingForFavor &&
     !gameState.waitingForDefuse &&
+    !gameState.waitingForImplodingInsert &&
     !isSeeingFuture
   ) {
     activeExpiresAt = gameState.turnExpiresAt;
@@ -323,7 +359,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
      gameState.lastNopeableAction.type === 'FAVOR') &&
     gameState.lastNopeableAction.targetId === socketId;
   
-  const isNopeOpportunity = !gameState.waitingForDefuse && (
+  const isNopeOpportunity = !gameState.waitingForDefuse && !gameState.waitingForImplodingInsert && (
     isWindowActive || 
     (gameState.waitingForFavor?.victimId === socketId) || 
     (gameState.waitingForSteal?.victimId === socketId) || 
@@ -1167,7 +1203,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
             </motion.button>
 
             <span 
-              className="mt-2 text-white font-cartoon text-xl sm:text-2xl font-bold tracking-tighter" 
+              className="mt-6 sm:mt-8 text-white font-cartoon text-xl sm:text-2xl font-bold tracking-tighter" 
               style={{ textShadow: '2px 2px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 2px 4px 6px rgba(0,0,0,0.5)' }}
             >
                {gameState.drawPileCount} CARDS LEFT
@@ -1545,9 +1581,107 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
         )}
       </AnimatePresence>
 
+      {/* Alter The Future Overlay */}
+      <AnimatePresence>
+        {isAlteringFuture && alteringCards.length > 0 && (
+          <motion.div 
+            key="alter-future-overlay"
+            initial={{ opacity: 0 }} 
+            animate={{ opacity: 1 }} 
+            exit={{ opacity: 0 }}
+            className="absolute inset-0 bg-black/90 backdrop-blur-3xl z-[60] flex flex-col items-center justify-center p-8 pointer-events-auto"
+          >
+              {/* Background animated orbs */}
+              <motion.div 
+                className="absolute w-96 h-96 rounded-full bg-emerald-600/10 blur-[100px]"
+                animate={{ scale: [1, 1.3, 1], x: [-50, 50, -50], y: [-20, 20, -20] }}
+                transition={{ duration: 6, repeat: Infinity, ease: 'easeInOut' }}
+              />
+              <motion.div 
+                className="absolute w-64 h-64 rounded-full bg-cyan-500/10 blur-[80px]"
+                animate={{ scale: [1.2, 1, 1.2], x: [30, -30, 30], y: [10, -30, 10] }}
+                transition={{ duration: 5, repeat: Infinity, ease: 'easeInOut' }}
+              />
+
+              {/* Title with eye icon */}
+              <motion.div 
+                initial={{ y: -40, opacity: 0 }} 
+                animate={{ y: 0, opacity: 1 }} 
+                transition={{ duration: 0.6, ease: 'easeOut' }}
+                className="flex flex-col items-center mb-10"
+              >
+                <motion.span 
+                  className="text-6xl mb-3"
+                  animate={{ scale: [1, 1.15, 1], rotate: [0, 5, -5, 0] }}
+                  transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
+                >
+                  👁️‍🗨️
+                </motion.span>
+                <h2 className="text-3xl sm:text-4xl font-cartoon text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 via-teal-500 to-cyan-400 uppercase tracking-tighter italic">
+                  Alter The Future
+                </h2>
+                <p className="text-slate-400 mt-2 font-cartoon uppercase tracking-wider text-[10px] text-center">
+                  Drag and drop to rearrange the top 3 cards
+                </p>
+              </motion.div>
+              
+              <Reorder.Group 
+                axis="x" 
+                values={alteringCards} 
+                onReorder={setAlteringCards} 
+                className="flex justify-center gap-6 sm:gap-10 mb-14"
+              >
+                 {alteringCards.map((card, i) => {
+                    const labels = ['TOP', '2nd', '3rd'];
+                    const labelColors = [
+                      'from-red-500 to-orange-500 border-red-500/40 shadow-[0_0_20px_rgba(239,68,68,0.4)]',
+                      'from-amber-500 to-yellow-500 border-amber-500/40 shadow-[0_0_20px_rgba(245,158,11,0.3)]',
+                      'from-sky-500 to-blue-500 border-sky-500/40 shadow-[0_0_20px_rgba(14,165,233,0.3)]',
+                    ];
+                    return (
+                      <Reorder.Item 
+                        key={card.id} 
+                        value={card}
+                        initial={{ y: 120, opacity: 0, scale: 0.5 }}
+                        animate={{ y: 0, opacity: 1, scale: 1 }}
+                        transition={{ 
+                          type: 'spring', 
+                          stiffness: 300, 
+                          damping: 30,
+                        }}
+                        className="flex flex-col items-center cursor-grab active:cursor-grabbing relative"
+                      >
+                        <div className="relative">
+                          {/* Highlight drop shadow when dragged */}
+                          <CardView card={card} disabled className="w-28 sm:w-36 h-42 sm:h-54 pointer-events-none" />
+                        </div>
+                        <div className="mt-3 text-center absolute -bottom-10 pointer-events-none">
+                          <span className={`text-[10px] sm:text-xs font-cartoon uppercase tracking-widest px-4 py-1.5 rounded-full border bg-gradient-to-r text-white ${labelColors[i]}`}>
+                            {labels[i]}
+                          </span>
+                        </div>
+                      </Reorder.Item>
+                    );
+                 })}
+              </Reorder.Group>
+
+              {/* Confirm Button */}
+              <motion.button
+                initial={{ y: 20, opacity: 0 }}
+                animate={{ y: 0, opacity: 1 }}
+                transition={{ delay: 0.5 }}
+                onClick={() => onAction({ type: 'CONFIRM_ALTER_FUTURE', reorderedCardIds: alteringCards.map(c => c.id) })}
+                className="mt-6 px-10 py-3.5 font-cartoon text-xl tracking-widest text-white uppercase bg-gradient-to-r from-emerald-500 to-teal-600 border-2 border-emerald-400/50 rounded-full shadow-[0_10px_30px_rgba(16,185,129,0.4)] hover:scale-105 active:scale-95 transition-all"
+              >
+                Confirm Order
+              </motion.button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Explosions & Alerts - Dramatic Defusing Banner */}
       <AnimatePresence>
-        {gameState.waitingForDefuse && gameState.waitingForDefuse !== socketId && (
+        {(gameState.waitingForDefuse || gameState.waitingForImplodingInsert) && (gameState.waitingForDefuse !== socketId && gameState.waitingForImplodingInsert !== socketId) && (
           <motion.div
             key="defusing-banner"
             initial={{ y: -100, opacity: 0, scale: 0.5, rotate: -2 }}
@@ -1579,7 +1713,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
                       💣
                     </motion.span>
                     <p className="font-cartoon text-white uppercase tracking-widest text-2xl drop-shadow-[0_2px_2px_rgba(0,0,0,0.5)]">
-                      {gameState.players.find(p => p.id === gameState.waitingForDefuse)?.name} is defusing!
+                      {gameState.players.find(p => p.id === (gameState.waitingForDefuse || gameState.waitingForImplodingInsert))?.name} is {gameState.waitingForImplodingInsert ? 'inserting Imploding Kitten' : 'defusing'}!
                     </p>
                   </div>
                   <motion.div 
@@ -1607,6 +1741,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
         </div>
       )}
 
+
       {/* Action Window Overlay */}
 
       {/* Target Selection Dramatic Text */}
@@ -1626,7 +1761,9 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
                   ? 'bg-gradient-to-b from-purple-300 via-purple-500 to-fuchsia-700'
                   : showTargetModal.type === '2-CARD'
                     ? 'bg-gradient-to-b from-orange-300 via-orange-500 to-red-700'
-                    : 'bg-gradient-to-b from-fuchsia-300 via-pink-500 to-rose-700'
+                    : showTargetModal.type === 'TARGETED_ATTACK'
+                      ? 'bg-gradient-to-b from-amber-300 via-red-500 to-red-900'
+                      : 'bg-gradient-to-b from-fuchsia-300 via-pink-500 to-rose-700'
               }`}
               style={{
                 WebkitTextStroke: "4px black",
@@ -1641,7 +1778,9 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
                   ? 'CHOOSE TARGET!'
                   : showTargetModal.type === '2-CARD'
                     ? 'STEAL FROM WHO?'
-                    : 'CHOOSE A VICTIM!'}
+                    : showTargetModal.type === 'TARGETED_ATTACK'
+                      ? 'ATTACK WHO?'
+                      : 'CHOOSE A VICTIM!'}
             </h1>
             
             <motion.p 
@@ -1721,9 +1860,9 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
         )}
       </AnimatePresence>
 
-      {/* Kaboom (Defuse Required) Overlay */}
+      {/* Kaboom (Defuse Required) / Imploding Kitten Overlay */}
       <AnimatePresence>
-        {isExploding && isMyTurn && (
+        {(isExploding || isImplodingInsert) && isMyTurn && (
           <motion.div 
             key="kaboom-overlay"
             initial={{ opacity: 0 }} 
@@ -1739,18 +1878,18 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
                 transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
               >
                 <motion.h2 
-                  className="text-7xl md:text-9xl font-cartoon text-transparent bg-clip-text bg-gradient-to-b from-red-300 via-orange-500 to-red-600 drop-shadow-[0_15px_30px_rgba(220,38,38,0.8)] uppercase tracking-tighter"
+                  className="text-7xl md:text-9xl font-cartoon text-transparent bg-clip-text bg-gradient-to-b from-red-300 via-orange-500 to-red-600 drop-shadow-[0_15px_30px_rgba(220,38,38,0.8)] uppercase tracking-tighter text-center leading-none"
                   animate={{ scale: [1, 1.05, 1], rotate: [0, -1, 1, 0] }}
                   transition={{ duration: 0.3, repeat: Infinity, ease: 'linear' }}
                 >
-                  KABOOM!
+                  {isImplodingInsert ? 'IMPLODING\nKITTEN!' : 'KABOOM!'}
                 </motion.h2>
-                <p className="text-xl md:text-2xl text-white font-cartoon uppercase tracking-widest mt-2 bg-black/40 px-6 py-2 rounded-full backdrop-blur-sm border border-red-500/30 shadow-lg">
-                  BOMB EXPLODES IN {gameState.bombCountdown ?? 15}s
+                <p className="text-xl md:text-2xl text-white font-cartoon uppercase tracking-widest mt-4 bg-black/40 px-6 py-2 rounded-full backdrop-blur-sm border border-red-500/30 shadow-lg text-center">
+                  {isImplodingInsert ? 'YOU MUST PUT IT BACK (FACE UP) IN' : 'BOMB EXPLODES IN'} {gameState.bombCountdown ?? 15}s
                 </p>
               </motion.div>
               
-              {hasDefuse ? (
+              {(hasDefuse || isImplodingInsert) ? (
                 <motion.div 
                   className="flex flex-col items-center gap-6 bg-[#faf5ec] border-[6px] border-amber-900/80 p-8 rounded-[2rem] shadow-[0_20px_50px_rgba(0,0,0,0.5),inset_0_0_20px_rgba(120,60,20,0.2)] max-w-lg w-full relative z-10"
                   initial={{ y: 100, opacity: 0 }}
@@ -1764,13 +1903,13 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
                   {/* Preset quick buttons */}
                   <div className="flex gap-4 justify-center w-full">
                     <button 
-                      onClick={() => { setDefuseInsertIndex(0); onAction({ type: 'DEFUSE', insertIndex: 0 }); }}
+                      onClick={() => { setDefuseInsertIndex(0); onAction({ type: isImplodingInsert ? 'IMPLODE_INSERT' : 'DEFUSE', insertIndex: 0 }); }}
                       className="flex-1 py-4 rounded-2xl bg-gradient-to-b from-amber-400 to-orange-500 border-b-4 border-orange-700 text-white font-cartoon text-xl tracking-wider transition-all hover:brightness-110 active:border-b-0 active:translate-y-1 shadow-md"
                     >
                       TOP
                     </button>
                     <button 
-                      onClick={() => { setDefuseInsertIndex(1); onAction({ type: 'DEFUSE', insertIndex: 1 }); }}
+                      onClick={() => { setDefuseInsertIndex(1); onAction({ type: isImplodingInsert ? 'IMPLODE_INSERT' : 'DEFUSE', insertIndex: 1 }); }}
                       className="flex-1 py-4 rounded-2xl bg-gradient-to-b from-amber-200 to-amber-400 border-b-4 border-amber-600 text-amber-900 font-cartoon text-xl tracking-wider transition-all hover:brightness-110 active:border-b-0 active:translate-y-1 shadow-md"
                     >
                       2ND
@@ -1779,7 +1918,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
                       onClick={() => {
                         const idx = Math.floor(Math.random() * (gameState.drawPileCount + 1));
                         setDefuseInsertIndex(idx);
-                        onAction({ type: 'DEFUSE', insertIndex: idx });
+                        onAction({ type: isImplodingInsert ? 'IMPLODE_INSERT' : 'DEFUSE', insertIndex: idx });
                       }}
                       className="flex-1 py-4 rounded-2xl bg-gradient-to-b from-purple-400 to-purple-600 border-b-4 border-purple-800 text-white font-cartoon text-xl tracking-wider transition-all hover:brightness-110 active:border-b-0 active:translate-y-1 shadow-md"
                     >
@@ -1833,7 +1972,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
                     </span>
 
                     <button 
-                      onClick={() => onAction({ type: 'DEFUSE', insertIndex: defuseInsertIndex })}
+                      onClick={() => onAction({ type: isImplodingInsert ? 'IMPLODE_INSERT' : 'DEFUSE', insertIndex: defuseInsertIndex })}
                       className="w-full mt-2 py-5 rounded-2xl bg-gradient-to-b from-emerald-400 to-green-600 border-b-[6px] border-green-800 font-cartoon uppercase tracking-widest text-white text-2xl transition-all hover:brightness-110 active:border-b-0 active:translate-y-1.5 shadow-lg"
                     >
                       HIDE IT!

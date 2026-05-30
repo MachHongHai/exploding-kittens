@@ -1,18 +1,19 @@
 import React, { useState } from 'react';
 
 interface LobbyProps {
-  onJoin: (name: string, difficulty: 'EASY' | 'MEDIUM' | 'HARD' | 'PLAY_WITH_GEMINI', botCount: number) => void;
+  onJoin: (name: string, difficulty: 'EASY' | 'MEDIUM' | 'HARD' | 'PLAY_WITH_GEMINI', botCount: number, deckType: 'ORIGINAL' | 'IMPLODING_KITTENS') => void;
 }
 
 export const Lobby: React.FC<LobbyProps> = ({ onJoin }) => {
   const [name, setName] = useState('');
   const [difficulty, setDifficulty] = useState<'EASY' | 'MEDIUM' | 'HARD' | 'PLAY_WITH_GEMINI'>('MEDIUM');
   const [botCount, setBotCount] = useState(3);
+  const [deckType, setDeckType] = useState<'ORIGINAL' | 'IMPLODING_KITTENS'>('ORIGINAL');
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (name.trim()) {
-      onJoin(name.trim(), difficulty, botCount);
+      onJoin(name.trim(), difficulty, botCount, deckType);
     }
   };
 
@@ -82,6 +83,51 @@ export const Lobby: React.FC<LobbyProps> = ({ onJoin }) => {
                   {difficulty === level && <span className="w-1.5 h-1.5 rounded-full bg-orange-500 shadow-[0_0_8px_rgba(249,115,22,1)]"></span>}
                 </button>
               ))}
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-[10px] font-bold text-slate-400 mb-2 uppercase tracking-[0.2em] ml-1">
+              Select Deck
+            </label>
+            <div className="flex gap-4">
+              <button
+                type="button"
+                onClick={() => setDeckType('ORIGINAL')}
+                className={`relative flex-1 rounded-2xl border-2 transition-all duration-300 overflow-hidden ${
+                  deckType === 'ORIGINAL' 
+                    ? 'border-red-500 shadow-[0_0_20px_rgba(239,68,68,0.3)] scale-105' 
+                    : 'border-white/10 hover:border-white/30 hover:scale-105 opacity-60'
+                }`}
+              >
+                <div className="absolute inset-0 bg-gradient-to-br from-red-600/40 to-transparent"></div>
+                <div className="p-4 flex flex-col items-center relative z-10">
+                  <div className="w-12 h-12 bg-red-500/20 rounded-full flex items-center justify-center mb-2">
+                    <span className="text-2xl">💣</span>
+                  </div>
+                  <h3 className="font-black text-sm text-white uppercase tracking-wider mb-1">Original</h3>
+                  <p className="text-[10px] text-slate-300 text-center leading-tight">56 Cards<br/>Up to 5 Players</p>
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setDeckType('IMPLODING_KITTENS')}
+                className={`relative flex-1 rounded-2xl border-2 transition-all duration-300 overflow-hidden ${
+                  deckType === 'IMPLODING_KITTENS' 
+                    ? 'border-emerald-500 shadow-[0_0_20px_rgba(16,185,129,0.3)] scale-105' 
+                    : 'border-white/10 hover:border-white/30 hover:scale-105 opacity-60'
+                }`}
+              >
+                <div className="absolute inset-0 bg-gradient-to-br from-emerald-600/40 to-transparent"></div>
+                <div className="p-4 flex flex-col items-center relative z-10">
+                  <div className="w-12 h-12 bg-emerald-500/20 rounded-full flex items-center justify-center mb-2">
+                    <span className="text-2xl">💥</span>
+                  </div>
+                  <h3 className="font-black text-sm text-white uppercase tracking-wider mb-1 text-center leading-none">Imploding<br/>Expansion</h3>
+                  <p className="text-[10px] text-slate-300 text-center leading-tight">76 Cards<br/>Up to 6 Players</p>
+                </div>
+              </button>
             </div>
           </div>
 

@@ -3,6 +3,7 @@ import { Game } from '../game/Game.js';
 import { Player } from '../game/models.js';
 import { AIBotController } from '../game/AIBot.js';
 import { PlayerAction, CardType } from '../../../shared/src/types.js';
+import { ImplodingKittensGameLogic } from '../game/expansions/ImplodingKittensGameLogic.js';
 
 export class GameGateway {
   private io: Server;
@@ -18,6 +19,8 @@ export class GameGateway {
   private stealTimer: NodeJS.Timeout | null = null;
   private favorTimer: NodeJS.Timeout | null = null;
   private turnTimer: NodeJS.Timeout | null = null;
+  private alterFutureTimer: NodeJS.Timeout | null = null;
+  private implodingInsertTimer: NodeJS.Timeout | null = null;
   private countdownIntervals: Map<string, NodeJS.Timeout> = new Map();
 
   constructor(io: Server) {
@@ -31,10 +34,10 @@ export class GameGateway {
     this.io.on('connection', (socket: Socket) => {
       console.log(`[Socket] Client connected: ${socket.id}`);
 
-      socket.on('join_match', (data: { name: string, difficulty: 'EASY' | 'MEDIUM' | 'HARD' | 'PLAY_WITH_GEMINI', botCount?: number }) => {
+      socket.on('join_match', (data: { name: string, difficulty: 'EASY' | 'MEDIUM' | 'HARD' | 'PLAY_WITH_GEMINI', botCount?: number, deckType?: 'ORIGINAL' | 'IMPLODING_KITTENS' }) => {
         this.clearAllTimers();
         // Reset game for demo purposes when a new player joins
-        this.game = new Game('match_1');
+        this.game = new Game('match_1', data.deckType || 'ORIGINAL');
         this.botController = new AIBotController(this.game);
         this.botDifficulty = data.difficulty;
 
@@ -88,6 +91,10 @@ export class GameGateway {
     this.favorTimer = null;
     if (this.turnTimer) clearTimeout(this.turnTimer);
     this.turnTimer = null;
+    if (this.alterFutureTimer) clearTimeout(this.alterFutureTimer);
+    this.alterFutureTimer = null;
+    if (this.implodingInsertTimer) clearTimeout(this.implodingInsertTimer);
+    this.implodingInsertTimer = null;
     this.countdownIntervals.clear();
   }
 
@@ -113,11 +120,47 @@ export class GameGateway {
     this.broadcastState();
 
     this.nopeTimer = setTimeout(async () => {
+      // Save info about the pending action before resolving
+      const pendingCardType = this.game.pendingAction?.cards[0]?.type;
+      const pendingPlayerId = this.game.pendingAction?.playerId;
+      
       this.game.resolvePendingAction();
       this.nopeTimer = null;
       this.checkStateTimers();
       this.broadcastState();
       
+      // If the resolved card was DRAW_FROM_THE_BOTTOM, auto-draw from bottom
+      if (pendingCardType === 'DRAW_FROM_THE_BOTTOM' && pendingPlayerId && this.game.status === 'PLAYING' && !this.game.waitingForTarget) {
+        // Small delay for animation
+        setTimeout(async () => {
+          if (this.game.status === 'PLAYING') {
+            await this.processAction(pendingPlayerId, { type: 'DRAW_FROM_BOTTOM' });
+          }
+        }, 1000);
+        return;
+      }
+
+      // If the resolved card was TARGETED_ATTACK, start target timer
+      if (this.game.waitingForTarget?.type === 'TARGETED_ATTACK') {
+        const targetPlayerId = this.game.waitingForTarget.playerId;
+        const player = this.game.players.find(p => p.id === targetPlayerId);
+        if (player?.isBot) {
+          // Bot auto-selects target
+          setTimeout(async () => {
+            if (this.game.waitingForTarget?.type === 'TARGETED_ATTACK') {
+              const opponents = this.game.players.filter(p => p.id !== targetPlayerId && !p.isEliminated);
+              if (opponents.length > 0) {
+                const target = opponents[Math.floor(Math.random() * opponents.length)];
+                await this.processAction(targetPlayerId, { type: 'SELECT_TARGET', targetId: target.id });
+              }
+            }
+          }, 2000);
+        } else {
+          this.startTargetTimer(targetPlayerId);
+        }
+        return;
+      }
+
       // If playing after resolution
       if (this.game.status === 'PLAYING') {
         await this.checkBotTurn();
@@ -184,7 +227,14 @@ export class GameGateway {
       this.favorTimer = null;
     }
 
-    const hasActiveInteraction = this.game.pendingAction || this.game.waitingForTarget || this.game.waitingForSteal || this.game.waitingForFavor || this.game.waitingForDefuse || this.game.playerSeeingFuture !== null;
+    if (this.game.playerAlteringFuture && !this.alterFutureTimer) {
+      this.startAlterFutureTimer();
+    } else if (!this.game.playerAlteringFuture && this.alterFutureTimer) {
+      clearTimeout(this.alterFutureTimer);
+      this.alterFutureTimer = null;
+    }
+
+    const hasActiveInteraction = this.game.pendingAction || this.game.waitingForTarget || this.game.waitingForSteal || this.game.waitingForFavor || this.game.waitingForDefuse || this.game.waitingForImplodingInsert || this.game.playerSeeingFuture !== null || this.game.playerAlteringFuture !== null;
     
     if (!hasActiveInteraction && !this.turnTimer) {
       this.startTurnTimer(delayExtra);
@@ -236,12 +286,66 @@ export class GameGateway {
     }, 10000);
   }
 
+  private startAlterFutureTimer() {
+    if (this.alterFutureTimer) clearTimeout(this.alterFutureTimer);
+    this.alterFutureTimer = setTimeout(async () => {
+      const playerId = this.game.playerAlteringFuture;
+      if (playerId && this.game.alteringFutureCards.length > 0) {
+        console.log(`[GameGateway] Alter future timed out for ${playerId}. Auto-confirming original order.`);
+        // Auto-confirm with original order
+        await this.processAction(playerId, { type: 'CONFIRM_ALTER_FUTURE', reorderedCardIds: this.game.alteringFutureCards.map(c => c.id) });
+      }
+    }, 15000);
+  }
+
+  private startImplodingInsertTimer(playerId: string) {
+    if (this.implodingInsertTimer) clearTimeout(this.implodingInsertTimer);
+    
+    const player = this.game.players.find(p => p.id === playerId);
+    
+    // If bot, auto-insert immediately (at a strategic position)
+    if (player?.isBot) {
+      setTimeout(async () => {
+        if (this.game.waitingForImplodingInsert === playerId) {
+          // Bot inserts at position 1 (just below top) to make next player draw it
+          const insertPos = Math.min(1, this.game.drawPile.length);
+          await this.processAction(playerId, { type: 'IMPLODE_INSERT', insertIndex: insertPos });
+        }
+      }, 2000);
+      return;
+    }
+
+    // Start countdown for human players
+    let secondsLeft = 15;
+    this.game.bombCountdown = secondsLeft;
+    this.broadcastState();
+
+    const interval = setInterval(() => {
+      secondsLeft -= 1;
+      this.game.bombCountdown = secondsLeft;
+      if (secondsLeft <= 0) {
+        clearInterval(interval);
+        this.countdownIntervals.delete(playerId);
+      }
+      this.broadcastState();
+    }, 1000);
+
+    this.countdownIntervals.set(playerId, interval);
+
+    this.implodingInsertTimer = setTimeout(async () => {
+      if (this.game.waitingForImplodingInsert === playerId) {
+        console.log(`[GameGateway] Imploding insert timed out for ${playerId}. Auto-inserting at top.`);
+        await this.processAction(playerId, { type: 'IMPLODE_INSERT', insertIndex: 0 });
+      }
+    }, 15000);
+  }
+
   private startTurnTimer(delayExtra: number = 0) {
     if (this.turnTimer) clearTimeout(this.turnTimer);
     this.game.turnExpiresAt = Date.now() + 15000 + delayExtra;
     this.turnTimer = setTimeout(async () => {
       const currentPlayer = this.game.getCurrentPlayer();
-      if (currentPlayer && this.game.status === 'PLAYING' && !this.game.pendingAction && !this.game.waitingForDefuse && !this.game.waitingForSteal && !this.game.waitingForFavor && !this.game.waitingForTarget) {
+      if (currentPlayer && this.game.status === 'PLAYING' && !this.game.pendingAction && !this.game.waitingForDefuse && !this.game.waitingForSteal && !this.game.waitingForFavor && !this.game.waitingForTarget && !this.game.waitingForImplodingInsert) {
         console.log(`[GameGateway] Turn timed out for ${currentPlayer.name}`);
         await this.processAction(currentPlayer.id, { type: 'DRAW_CARD' });
       }
@@ -257,7 +361,21 @@ export class GameGateway {
       if (this.game.pendingAction) return { success: false, message: "Wait for action to resolve!" };
       result = this.game.drawPhase(playerId);
       if (result === 'DEFUSE_REQUIRED') {
-        this.startBombTimer(playerId);
+        if (this.game.waitingForImplodingInsert) {
+          this.startImplodingInsertTimer(playerId);
+        } else {
+          this.startBombTimer(playerId);
+        }
+      }
+    } else if (action.type === 'DRAW_FROM_BOTTOM') {
+      if (this.game.pendingAction) return { success: false, message: "Wait for action to resolve!" };
+      result = this.game.drawFromBottom(playerId);
+      if (result === 'DEFUSE_REQUIRED') {
+        if (this.game.waitingForImplodingInsert) {
+          this.startImplodingInsertTimer(playerId);
+        } else {
+          this.startBombTimer(playerId);
+        }
       }
     } else if (action.type === 'PLAY_CARDS') {
       actionResult = this.game.playCards(playerId, action.cardIds, action.targetId, action.requestedCardType);
@@ -308,6 +426,9 @@ export class GameGateway {
       actionResult = { success, message: success ? '' : 'Failed to give card' };
     } else if (action.type === 'CONFIRM_FUTURE') {
       this.game.clearFuture(playerId);
+    } else if (action.type === 'CONFIRM_ALTER_FUTURE') {
+      const success = ImplodingKittensGameLogic.confirmAlterFuture(this.game, playerId, action.reorderedCardIds);
+      actionResult = { success, message: success ? '' : 'Failed to alter future' };
     } else if (action.type === 'DEFUSE') {
       const success = this.game.defuseKitten(playerId, action.insertIndex);
       if (success) {
@@ -316,6 +437,16 @@ export class GameGateway {
         delayExtra = 3000;
       } else {
         return { success: false, message: "Invalid defuse action" };
+      }
+    } else if (action.type === 'IMPLODE_INSERT') {
+      const success = this.game.insertImplodingKitten(playerId, action.insertIndex);
+      if (success) {
+        if (this.implodingInsertTimer) { clearTimeout(this.implodingInsertTimer); this.implodingInsertTimer = null; }
+        this.clearTimersForPlayer(playerId);
+        this.game.bombCountdown = undefined;
+        delayExtra = 2000;
+      } else {
+        return { success: false, message: "Invalid imploding kitten insertion" };
       }
     }
 
@@ -370,8 +501,8 @@ export class GameGateway {
     const currentPlayer = this.game.getCurrentPlayer();
     if (!currentPlayer || !currentPlayer.isBot || this.game.status !== 'PLAYING') return;
 
-    if (this.game.pendingAction || this.game.waitingForFavor || this.game.waitingForSteal) {
-      console.log(`[GameGateway] Bot turn paused because game has pending action or is waiting for Favor/Steal.`);
+    if (this.game.pendingAction || this.game.waitingForFavor || this.game.waitingForSteal || this.game.waitingForImplodingInsert) {
+      console.log(`[GameGateway] Bot turn paused because game has pending action or is waiting for Favor/Steal/ImplodingInsert.`);
       return;
     }
 
