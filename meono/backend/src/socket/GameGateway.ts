@@ -236,6 +236,7 @@ export class GameGateway {
 
   private startTurnTimer() {
     if (this.turnTimer) clearTimeout(this.turnTimer);
+    this.game.turnExpiresAt = Date.now() + 15000;
     this.turnTimer = setTimeout(async () => {
       const currentPlayer = this.game.getCurrentPlayer();
       if (currentPlayer && this.game.status === 'PLAYING' && !this.game.pendingAction && !this.game.waitingForDefuse && !this.game.waitingForSteal && !this.game.waitingForFavor && !this.game.waitingForTarget) {
