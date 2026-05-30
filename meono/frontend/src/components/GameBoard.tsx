@@ -33,21 +33,23 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
   // Kitten Chance states
   const totalCards = gameState.drawPileCount;
   const kittens = gameState.explodingKittensCount ?? 0;
-  const kittenPercent = totalCards > 0 ? Math.round((kittens / totalCards) * 100) : 0;
+  // Don't round, so it moves physically on every single draw
+  const kittenPercent = totalCards > 0 ? (kittens / totalCards) * 100 : 0;
   
-  
-
+  // Map actual chance to visual gauge: 0-33% actual chance maps to 0-75% visual width (Green/Yellow/Orange).
+  // >33% maps to 75-100% (Red Alert zone).
+  const visualPercent = Math.min(100, (kittenPercent / 33) * 75);
 
   const [prevKittenPercent, setPrevKittenPercent] = useState(kittenPercent);
   const [shouldJoltDial, setShouldJoltDial] = useState(false);
   const [joltType, setJoltType] = useState<'increase' | 'decrease' | null>(null);
   const [needleJitter, setNeedleJitter] = useState(0);
 
-  // Wiggle needle when danger is high (>50%)
+  // Wiggle needle when danger is high (actual chance > 20%)
   useEffect(() => {
-    if (kittenPercent > 50) {
+    if (kittenPercent > 20) {
       const interval = setInterval(() => {
-        const magnitude = kittenPercent > 75 ? 2.2 : 1.2;
+        const magnitude = kittenPercent > 33 ? 2.2 : 1.2;
         setNeedleJitter((Math.random() - 0.5) * magnitude);
       }, 70);
       return () => {
@@ -795,24 +797,45 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
                                 className={`rounded-lg shadow-lg flex items-center justify-center shrink-0 origin-bottom transition-all duration-300 relative overflow-hidden ${
                                   isStealTarget 
                                     ? 'border-2 border-amber-300 cursor-pointer shadow-[0_0_20px_rgba(249,115,22,0.9)]' 
-                                    : 'border border-red-800/60'
+                                    : 'border border-black/90'
                                 }`}
                                 style={{ transform: `rotate(${rotation}deg) translateY(${translateY}px)` }}
                               >
-                                {/* Card back gradient base */}
-                                <div className={`absolute inset-0 ${
-                                  isStealTarget 
-                                    ? 'bg-gradient-to-b from-orange-500 via-red-600 to-red-800'
-                                    : 'bg-gradient-to-br from-red-700 via-red-800 to-[#4a0e0e]'
-                                }`} />
-                                {/* Subtle diamond pattern texture */}
-                                <div className="absolute inset-0 opacity-[0.08] bg-[repeating-conic-gradient(rgba(255,255,255,0.3)_0%_25%,transparent_0%_50%)] bg-[length:8px_8px]" />
-                                {/* Holographic top glare */}
-                                <div className="absolute top-0 left-0 right-0 h-1/3 bg-gradient-to-b from-white/20 to-transparent rounded-t-lg pointer-events-none mix-blend-overlay" />
+                                {/* Card back background */}
+                                <div className="absolute inset-0 bg-[#8b1a28] shadow-[inset_0_0_8px_rgba(0,0,0,0.5)]" />
                                 
-                                <span className={`relative z-10 text-white font-cartoon leading-none ${isStealTarget ? 'text-lg font-black' : 'text-[6px] scale-[0.7]'}`}>
-                                  {isStealTarget ? '?' : '🐾'}
-                                </span>
+                                {/* Premium crosshatch pattern */}
+                                <div className="absolute inset-0 opacity-[0.06] bg-[repeating-conic-gradient(rgba(255,255,255,0.4)_0%_25%,transparent_0%_50%)] bg-[length:6px_6px] z-0"></div>
+                                
+                                {isStealTarget ? (
+                                  <div className="flex flex-col items-center justify-center z-10 relative leading-none w-full h-full p-1">
+                                    {/* Cat Logo for EK2 */}
+                                    <svg className="w-6 h-6 text-[#facc15] fill-current drop-shadow-md mb-0.5" viewBox="0 0 64 64">
+                                       <path d="M16 40 L16 30 C16 20, 48 20, 48 30 L48 40 Z" fill="#facc15" stroke="#000" strokeWidth="2.5" />
+                                       <path d="M16 25 L10 15 L25 22 Z" fill="#facc15" stroke="#000" strokeWidth="2.5" />
+                                       <path d="M48 25 L54 15 L39 22 Z" fill="#facc15" stroke="#000" strokeWidth="2.5" />
+                                       <path d="M16 35 C5 35, 5 45, 12 45" stroke="#facc15" strokeWidth="4" fill="none" strokeLinecap="round" />
+                                    </svg>
+                                    <div className="flex flex-col items-center leading-none tracking-tighter transform -skew-x-3 -rotate-2">
+                                      <span className="text-[#facc15] font-black text-[7px] drop-shadow-[0.5px_0.5px_0_#000] uppercase">EXPLODING</span>
+                                      <span className="text-white font-black text-[10px] drop-shadow-[0.5px_0.5px_0_#000] -mt-0.5">KITTENS</span>
+                                      <span className="text-white font-black text-[18px] drop-shadow-[1px_1px_0_#000] -mt-0.5">2</span>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <div className="flex flex-col items-center justify-center z-10 relative leading-none w-full h-full">
+                                    {/* Small Cat Logo for tiny card view */}
+                                    <svg className="w-3.5 h-3.5 text-[#facc15] fill-current drop-shadow-sm mb-0.5" viewBox="0 0 64 64">
+                                       <path d="M16 40 L16 30 C16 20, 48 20, 48 30 L48 40 Z" fill="#facc15" stroke="#000" strokeWidth="2.5" />
+                                       <path d="M16 25 L10 15 L25 22 Z" fill="#facc15" stroke="#000" strokeWidth="2.5" />
+                                       <path d="M48 25 L54 15 L39 22 Z" fill="#facc15" stroke="#000" strokeWidth="2.5" />
+                                       <path d="M16 35 C5 35, 5 45, 12 45" stroke="#facc15" strokeWidth="4" fill="none" strokeLinecap="round" />
+                                    </svg>
+                                    <span className="text-white font-black text-[9px] drop-shadow-[0.5px_0.5px_0_#000] transform -skew-x-3 -rotate-2 -mt-0.5">2</span>
+                                  </div>
+                                )}
+                                {/* Holographic Top Glare */}
+                                <div className="absolute top-0 left-0 right-0 h-1/2 bg-gradient-to-b from-white/30 via-white/5 to-transparent rounded-t-lg pointer-events-none mix-blend-overlay z-20" />
                               </motion.button>
                             );
                           })}
@@ -840,85 +863,157 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
       <div className="relative z-10 flex-1 flex flex-row items-center justify-between px-8 py-2 max-w-6xl mx-auto w-full h-[45vh] max-h-[360px]">
         
         {/* Left Side: Bomb Chance Gauge (Redesigned to match image) */}
+        {/* Left Side: Bomb Chance Gauge (Redesigned to match image) */}
         <motion.div 
-          animate={shouldJoltDial ? { 
-            scale: joltType === 'increase' ? [1, 1.1, 0.95, 1] : [1, 1.05, 0.98, 1],
-            x: joltType === 'increase' ? [0, -5, 5, -2, 2, 0] : [0, 2, -2, 0]
-          } : {}}
-          transition={{ duration: 0.5, ease: 'easeOut' }}
-          className="relative flex flex-col items-center justify-center pointer-events-none select-none z-10 drop-shadow-[0_15px_15px_rgba(0,0,0,0.5)] ml-8 shrink-0"
-          style={{ transform: 'rotate(-4deg)' }}
+          animate={
+            shouldJoltDial 
+              ? { rotate: joltType === 'increase' ? [-4, 4, -2, 2, 0] : [4, -4, 2, -2, 0] } 
+              : kittenPercent >= 50 
+                ? { x: [-2, 2, -2, 2], y: [-1, 1, 1, -1] } 
+                : { x: 0, y: 0, rotate: 0 }
+          }
+          transition={
+            shouldJoltDial 
+              ? { duration: 0.5 } 
+              : kittenPercent >= 50 
+                ? { duration: 0.2, repeat: Infinity, repeatType: "mirror" } 
+                : { duration: 0.2 }
+          }
+          className="relative flex flex-col items-center justify-center pointer-events-none select-none z-10 ml-8 shrink-0 w-36 h-36 mt-4 drop-shadow-[0_10px_10px_rgba(0,0,0,0.5)]"
         >
-          {/* Top Notch/Bump */}
-          <div className="absolute -top-3 w-14 h-4 bg-gradient-to-b from-[#4a4a4a] to-[#2b2b2b] rounded-t-lg border-2 border-b-0 border-[#1a1a1a] z-10" />
-
-          {/* TOP HALF: Black Metallic Housing */}
-          <div className="relative bg-gradient-to-b from-[#3a3a3a] to-[#1f1f1f] w-48 h-16 rounded-xl border-t-2 border-l-2 border-r-2 border-b-4 border-[#111] flex items-center justify-center z-20 overflow-visible">
-            
-            {/* Top bevel highlight */}
-            <div className="absolute top-0 left-1 right-1 h-1 bg-white/10 rounded-full" />
-            
-            {/* Inner Recessed Screen */}
-            <div className="w-[88%] h-[65%] bg-[#0a0a0a] rounded-lg border-t-4 border-l-[3px] border-r-[3px] border-b-2 border-black/90 shadow-[inset_0_5px_10px_rgba(0,0,0,1)] relative flex items-center px-1 py-1">
-              
-              {/* Segmented color track */}
-              <div className="w-full h-full rounded flex opacity-90 shadow-inner overflow-hidden border border-black/50">
-                 <div className="flex-1 bg-[#8cc63f]" />
-                 <div className="flex-1 bg-[#f7b733]" />
-                 <div className="flex-1 bg-[#c25917]" />
-                 <div className="flex-1 bg-[#7b1717]" />
-              </div>
-              
-              {/* Glass Glare Overlay */}
-              <div className="absolute top-0 left-0 right-0 h-1/2 bg-gradient-to-b from-white/20 to-transparent pointer-events-none" />
-              
-              {/* Scanline / Pixel overlay */}
-              <div className="absolute inset-0 bg-[repeating-linear-gradient(90deg,transparent,transparent_4px,rgba(0,0,0,0.2)_4px,rgba(0,0,0,0.2)_5px)] mix-blend-overlay pointer-events-none" />
-
-              {/* The Sliding Needle */}
+          {/* Cartoon Smoke Animation for Danger > 33% */}
+          <AnimatePresence>
+            {kittenPercent > 33 && (
               <motion.div 
-                className="absolute bottom-0 flex flex-col items-center justify-end z-10 pointer-events-none"
-                style={{ width: '16px' }}
-                animate={{ left: `calc(${kittenPercent}% - 8px)` }}
-                transition={{ type: 'spring', stiffness: 120, damping: 14 }}
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="absolute -top-10 left-1/2 -translate-x-1/2 w-40 h-40 flex items-center justify-center pointer-events-none z-0 overflow-visible"
               >
-                 <svg width="16" height="28" viewBox="0 0 16 28" className="drop-shadow-[2px_2px_2px_rgba(0,0,0,0.8)]">
-                    <path d="M7,2 Q8,0 9,2 L10.5,20 A4.5,4.5 0 1,1 5.5,20 Z" fill="#9ca3af" stroke="#111" strokeWidth="1.5" strokeLinejoin="round" />
-                    <circle cx="8" cy="22" r="2.5" fill="#4b5563" />
-                    <circle cx="8" cy="22" r="1" fill="#fff" />
-                 </svg>
+                {/* Light Smoke (White/Gray) for >33% */}
+                {[...Array(kittenPercent >= 50 ? 3 : 5)].map((_, i) => {
+                  const anim = [
+                    { y: [0, -50, -100], x: [0, 20, 40], scale: [0.3, 1.4, 2.5] },
+                    { y: [0, -70, -110], x: [0, -30, -50], scale: [0.4, 1.7, 2.5] },
+                    { y: [0, -60, -90], x: [0, 10, 20], scale: [0.3, 1.2, 2.5] },
+                    { y: [0, -80, -120], x: [0, -15, -25], scale: [0.5, 1.8, 2.5] },
+                    { y: [0, -55, -100], x: [0, 25, 45], scale: [0.3, 1.5, 2.5] },
+                  ][i];
+                  return (
+                    <motion.div
+                      key={`light-smoke-${i}`}
+                      className="absolute bottom-10 w-12 h-12 bg-gray-200 border-2 border-gray-400 rounded-full"
+                      style={{ opacity: 0.8 }}
+                      animate={{ ...anim, opacity: [0.8, 0.8, 0] }}
+                      transition={{ duration: 1.5 + i * 0.1, repeat: Infinity, delay: i * 0.3, ease: "easeOut" }}
+                    />
+                  );
+                })}
+
+                {/* Heavy Dark Smoke for >=50% */}
+                {kittenPercent >= 50 && [...Array(8)].map((_, i) => {
+                  const anim = [
+                    { y: [0, -80, -140], x: [0, 40, 80], scale: [0.5, 2.2, 4] },
+                    { y: [0, -60, -120], x: [0, -50, -90], scale: [0.6, 2.8, 4] },
+                    { y: [0, -100, -160], x: [0, 20, 40], scale: [0.5, 2.4, 4] },
+                    { y: [0, -70, -130], x: [0, -30, -60], scale: [0.7, 2.9, 4] },
+                    { y: [0, -90, -150], x: [0, 60, 110], scale: [0.5, 2.5, 4] },
+                    { y: [0, -110, -170], x: [0, -40, -80], scale: [0.6, 2.1, 4] },
+                    { y: [0, -75, -135], x: [0, 30, 50], scale: [0.5, 2.7, 4] },
+                    { y: [0, -95, -155], x: [0, -60, -100], scale: [0.8, 2.3, 4] },
+                  ][i];
+                  return (
+                    <motion.div
+                      key={`heavy-smoke-${i}`}
+                      className="absolute bottom-10 w-16 h-16 bg-neutral-800 border-[3px] border-black rounded-full"
+                      animate={{ ...anim, opacity: [0.9, 0.9, 0] }}
+                      transition={{ duration: 1.2 + (i%3)*0.1, repeat: Infinity, delay: i * 0.15, ease: "easeOut" }}
+                    />
+                  );
+                })}
+
+                {/* Cartoon Sparks for >=50% */}
+                {kittenPercent >= 50 && [...Array(6)].map((_, i) => {
+                  const anim = [
+                    { y: [0, -120], x: [0, 50] },
+                    { y: [0, -150], x: [0, -70] },
+                    { y: [0, -110], x: [0, 90] },
+                    { y: [0, -160], x: [0, -40] },
+                    { y: [0, -130], x: [0, 60] },
+                    { y: [0, -140], x: [0, -80] },
+                  ][i];
+                  return (
+                    <motion.div
+                      key={`spark-${i}`}
+                      className="absolute bottom-4 w-4 h-4 bg-yellow-400 border-2 border-orange-600 shadow-sm"
+                      animate={{ ...anim, scale: [0.5, 1.5, 0], rotate: [0, 180, 360] }}
+                      transition={{ duration: 0.6 + (i%2)*0.2, repeat: Infinity, delay: i * 0.2, ease: "easeOut" }}
+                    />
+                  );
+                })}
               </motion.div>
-            </div>
-          </div>
-          
-          {/* BOTTOM HALF: Brown Flap (Trapezoid) */}
-          <div 
-            className="relative bg-gradient-to-b from-[#382010] to-[#4a2e15] w-[11rem] h-20 -mt-2 rounded-b-[4px] border-b-[3px] border-l-[3px] border-r-[3px] border-[#221208] z-10 flex items-center justify-center p-2 pt-4"
-            style={{ clipPath: 'polygon(5% 0, 95% 0, 100% 100%, 0% 100%)' }}
-          >
-             <div className="flex items-center gap-2 transform -rotate-[5deg] translate-y-1">
-                <span 
-                  className="font-cartoon text-white text-[28px] tracking-tighter" 
-                  style={{ WebkitTextStroke: '1.5px black', textShadow: '2px 3px 0 #000' }}
-                >
-                  {gameState.drawPileCount}/{gameState.initialDrawPileCount || 16}
+            )}
+          </AnimatePresence>
+
+          {/* Top Arch Text: "CHANCE OF KITTEN" */}
+          <svg className="absolute -top-[2.2rem] left-1/2 -translate-x-1/2 w-48 h-24 overflow-visible z-20 drop-shadow-[0_2px_4px_rgba(0,0,0,0.15)]" viewBox="0 0 200 100">
+            <path id="text-curve" d="M 20 90 Q 100 -10 180 90" fill="transparent" stroke="white" strokeWidth="26" strokeLinecap="round" />
+            <text fontSize="14" fill="#ef4444" fontWeight="900" style={{ fontFamily: 'Arial, Helvetica, sans-serif' }} letterSpacing="0.5">
+              <textPath href="#text-curve" startOffset="50%" textAnchor="middle" dominantBaseline="middle" dy="-3">
+                CHANCE OF KITTEN
+              </textPath>
+            </text>
+          </svg>
+
+          {/* Left % Box */}
+          <div className="absolute top-1/2 -left-14 -translate-y-1/2 w-[4.5rem] h-11 bg-white rounded-l-lg shadow-[-2px_4px_8px_rgba(0,0,0,0.1),inset_0_-2px_4px_rgba(0,0,0,0.05)] border-y-2 border-l-2 border-[#f8fafc] flex items-center justify-center pr-3 z-0">
+             <div className="flex items-baseline gap-[1px] ml-1">
+                <span className="text-[#ef4444] font-black text-2xl" style={{ fontFamily: 'Arial, sans-serif' }}>
+                  {Math.round(kittenPercent)}
                 </span>
-                
-                {/* Deck Icon SVG */}
-                <svg width="24" height="28" viewBox="0 0 24 28" className="drop-shadow-[2px_2px_0px_#000] rotate-12">
-                   {/* Bottom Card */}
-                   <path d="M5,10 L17,10 L22,26 L10,26 Z" fill="#e5e7eb" stroke="#000" strokeWidth="2" strokeLinejoin="round" />
-                   {/* Dots on bottom card */}
-                   <circle cx="16" cy="15" r="0.5" fill="#000" />
-                   <circle cx="13" cy="21" r="0.5" fill="#000" />
-                   
-                   {/* Top Card */}
-                   <path d="M1,6 L15,1 L22,17 L8,22 Z" fill="#fff" stroke="#000" strokeWidth="2" strokeLinejoin="round" />
-                   {/* Dots on top card */}
-                   <circle cx="10" cy="11" r="0.5" fill="#000" />
-                   <circle cx="14" cy="9" r="0.5" fill="#000" />
-                </svg>
+                <span className="text-[#ef4444] font-bold text-sm" style={{ fontFamily: 'Arial, sans-serif' }}>
+                  %
+                </span>
              </div>
+          </div>
+
+          {/* Main Circular Housing */}
+          <div className="relative w-full h-full bg-white rounded-full shadow-[0_6px_12px_rgba(0,0,0,0.2),inset_0_-4px_8px_rgba(0,0,0,0.05)] border-4 border-white flex items-center justify-center z-10">
+            
+            {/* The Inner Dial Face */}
+            <div className="w-[88%] h-[88%] rounded-full shadow-[inset_0_4px_8px_rgba(0,0,0,0.15)] overflow-hidden relative border border-gray-100 bg-[#f8fafc]">
+               {/* 4 Colored Segments using conic-gradient */}
+               <div 
+                 className="absolute inset-0"
+                 style={{
+                   background: 'conic-gradient(from 240deg, #f8fafc 0deg 60deg, #fcd34d 60deg 120deg, #fb923c 120deg 180deg, #ef4444 180deg 240deg, transparent 240deg 360deg)'
+                 }}
+               />
+               
+               {/* Inner White Cutout */}
+               <div className="absolute bottom-[-15%] left-1/2 -translate-x-1/2 w-[60%] h-[60%] bg-white rounded-full shadow-[0_-2px_6px_rgba(0,0,0,0.1)] flex items-start justify-center pt-2">
+               </div>
+
+               {/* 0 and 100 text */}
+               <span className="absolute bottom-5 left-5 text-gray-400 font-bold text-sm" style={{ fontFamily: 'Arial, sans-serif' }}>0</span>
+               <span className="absolute bottom-5 right-3 text-[#ef4444] font-bold text-sm" style={{ fontFamily: 'Arial, sans-serif' }}>100</span>
+
+               {/* The Rotating Needle */}
+               <motion.div
+                 className="absolute inset-0 z-20 pointer-events-none drop-shadow-md"
+                 animate={{ rotate: -120 + (kittenPercent / 100) * 240 }}
+                 transition={{ type: 'spring', stiffness: 100, damping: 12 }}
+               >
+                 <svg viewBox="0 0 100 100" className="w-full h-full">
+                    <polygon points="43,50 57,50 50,7" fill="#ef4444" />
+                 </svg>
+               </motion.div>
+
+               {/* Center Red Pivot Dot */}
+               <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-7 h-7 bg-[#ef4444] rounded-full z-30 shadow-sm flex items-center justify-center">
+                 <div className="w-2 h-2 bg-white rounded-full" />
+               </div>
+            </div>
           </div>
         </motion.div>
 
@@ -1018,6 +1113,13 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
                 </div>
               </div>
             </motion.button>
+
+            <span 
+              className="mt-2 text-white font-cartoon text-xl sm:text-2xl font-bold tracking-tighter" 
+              style={{ textShadow: '2px 2px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 2px 4px 6px rgba(0,0,0,0.5)' }}
+            >
+               {gameState.drawPileCount} CARDS LEFT
+            </span>
           </div>
 
           {/* Discard Pile */}
@@ -2078,11 +2180,43 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
               >
                 <g transform="translate(10, 0) rotate(-10)">
                   <rect x="0" y="0" width="160" height="220" rx="12" fill="#8b1a28" stroke="#000" strokeWidth="6" />
-                  <rect x="6" y="6" width="148" height="208" rx="8" fill="none" stroke="#fff" strokeWidth="3" opacity="0.4" />
-                  <path d="M60 100 L60 90 C60 80, 92 80, 92 90 L92 100 Z" fill="#facc15" stroke="#000" strokeWidth="4" />
-                  <path d="M60 85 L54 75 L69 82 Z" fill="#facc15" stroke="#000" strokeWidth="4" />
-                  <path d="M92 85 L98 75 L83 82 Z" fill="#facc15" stroke="#000" strokeWidth="4" />
-                  <path d="M60 95 C49 95, 49 105, 56 105" stroke="#facc15" strokeWidth="5" fill="none" strokeLinecap="round" />
+                  <rect x="6" y="6" width="148" height="208" rx="8" fill="none" stroke="#fff" strokeWidth="3" opacity="0.2" />
+                  
+                  {/* Cat Face Logo */}
+                  <g transform="translate(48, 25)">
+                    <path d="M16 40 L16 30 C16 20, 48 20, 48 30 L48 40 Z" fill="#facc15" stroke="#000" strokeWidth="3" />
+                    <path d="M16 25 L10 15 L25 22 Z" fill="#facc15" stroke="#000" strokeWidth="3" />
+                    <path d="M48 25 L54 15 L39 22 Z" fill="#facc15" stroke="#000" strokeWidth="3" />
+                    <path d="M16 35 C5 35, 5 45, 12 45" stroke="#facc15" strokeWidth="4.5" fill="none" strokeLinecap="round" />
+                  </g>
+
+                  {/* SVG Text elements for EK2 */}
+                  <g transform="translate(80, 115)" textAnchor="middle">
+                    <text 
+                      x="0" 
+                      y="0" 
+                      className="font-cartoon font-black text-[18px] fill-[#facc15] stroke-black stroke-[3px]"
+                      style={{ paintOrder: 'stroke fill', transform: 'skewX(-6) rotate(-2)' }}
+                    >
+                      EXPLODING
+                    </text>
+                    <text 
+                      x="0" 
+                      y="26" 
+                      className="font-cartoon font-black text-[24px] fill-white stroke-black stroke-[4px]"
+                      style={{ paintOrder: 'stroke fill', transform: 'skewX(-6) rotate(-2)' }}
+                    >
+                      KITTENS
+                    </text>
+                    <text 
+                      x="0" 
+                      y="70" 
+                      className="font-cartoon font-black text-[46px] fill-white stroke-black stroke-[5px]"
+                      style={{ paintOrder: 'stroke fill', transform: 'skewX(-6) rotate(-2)' }}
+                    >
+                      2
+                    </text>
+                  </g>
                 </g>
               </motion.g>
               {/* Thicker arm */}

@@ -17,7 +17,7 @@ export const CardView: React.FC<CardViewProps> = ({ card, onClick, disabled, cla
   const [imgError, setImgError] = React.useState(false);
   const [backImgError, setBackImgError] = React.useState(false);
 
-  // Card Back (The "Double-Bezel" premium look)
+  // Card Back (The "Double-Bezel" premium look matching the EK2 Draw Pile)
   if (!card) {
     return (
       <motion.button
@@ -25,43 +25,40 @@ export const CardView: React.FC<CardViewProps> = ({ card, onClick, disabled, cla
         initial={{ scale: 0.8, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
         exit={{ scale: 0.5, opacity: 0 }}
-        whileHover={!disabled ? { filter: "brightness(1.1)" } : {}}
+        whileHover={!disabled ? { filter: "brightness(1.15)" } : {}}
         whileTap={!disabled ? { scale: 0.95 } : {}}
         onClick={onClick}
         disabled={disabled}
         className={`aspect-[2/3] ${baseSize} p-1.5 rounded-[1.5rem] bg-white/5 border border-white/10 shadow-2xl backdrop-blur-md ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
           } ${className}`}
       >
-        <div className="w-full h-full rounded-[1.125rem] bg-gradient-to-br from-red-900 to-black shadow-[inset_0_1px_1px_rgba(255,255,255,0.2)] border border-red-500/20 flex flex-col items-center justify-center relative overflow-hidden pointer-events-none">
-          {!backImgError ? (
-            <img 
-              src="/cards/CARD_BACK.png" 
-              alt="Card Back"
-              className="absolute inset-0 w-full h-full object-cover rounded-[1.125rem] z-10"
-              onError={() => setBackImgError(true)}
-            />
-          ) : (
-            <>
-              {/* Premium crosshatch pattern */}
-              <div className="absolute inset-0 opacity-[0.06] bg-[repeating-conic-gradient(rgba(255,255,255,0.4)_0%_25%,transparent_0%_50%)] bg-[length:12px_12px] z-0"></div>
-              {/* Radial glow */}
-              <div className="absolute inset-0 opacity-30 bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-red-600/40 via-transparent to-transparent z-0"></div>
-              {/* Top-right highlight */}
-              <div className="absolute inset-0 opacity-20 bg-[radial-gradient(circle_at_top_right,_var(--tw-gradient-stops))] from-red-500 via-transparent to-transparent z-0"></div>
-              {/* Center cat silhouette */}
-              <div className="flex flex-col items-center justify-center z-10 relative">
-                <span className="text-3xl sm:text-4xl select-none drop-shadow-md opacity-80">🐱</span>
-                <span className="text-red-400/60 font-black text-[10px] sm:text-xs select-none tracking-[0.2em] mt-1 uppercase">Exploding</span>
+        <div className="w-full h-full rounded-[1.125rem] bg-[#8b1a28] border-2 border-black/90 shadow-[inset_0_0_15px_rgba(0,0,0,0.5)] flex flex-col items-center justify-center p-2 relative overflow-hidden pointer-events-none">
+          {/* Premium crosshatch pattern */}
+          <div className="absolute inset-0 opacity-[0.06] bg-[repeating-conic-gradient(rgba(255,255,255,0.4)_0%_25%,transparent_0%_50%)] bg-[length:12px_12px] z-0"></div>
+          {/* Radial glow */}
+          <div className="absolute inset-0 opacity-20 bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-red-600/40 via-transparent to-transparent z-0"></div>
+          
+          <div className="flex flex-col items-center justify-center z-10 relative leading-none">
+            {/* Cat Logo for EK2 */}
+            <svg className="w-8 h-8 sm:w-11 sm:h-11 text-[#facc15] fill-current drop-shadow-md mb-1 sm:mb-2" viewBox="0 0 64 64">
+               <path d="M16 40 L16 30 C16 20, 48 20, 48 30 L48 40 Z" fill="#facc15" stroke="#000" strokeWidth="2.5" />
+               <path d="M16 25 L10 15 L25 22 Z" fill="#facc15" stroke="#000" strokeWidth="2.5" />
+               <path d="M48 25 L54 15 L39 22 Z" fill="#facc15" stroke="#000" strokeWidth="2.5" />
+               <path d="M16 35 C5 35, 5 45, 12 45" stroke="#facc15" strokeWidth="4" fill="none" strokeLinecap="round" />
+            </svg>
+            
+            <div className="flex flex-col items-center leading-none tracking-tighter transform -skew-x-3 -rotate-2">
+              <span className="text-[#facc15] font-black text-[9px] sm:text-xs drop-shadow-[1px_1px_0_#000] uppercase">EXPLODING</span>
+              <div className="flex items-start">
+                <span className="text-white font-black text-xs sm:text-base drop-shadow-[1px_1px_0_#000] -mt-0.5">KITTENS</span>
+                <span className="text-white font-black text-[5px] sm:text-[6px] drop-shadow-[1px_1px_0_#000] ml-0.5 -mt-1">®</span>
               </div>
-              {/* Corner decorations */}
-              <div className="absolute top-2 left-2 w-1.5 h-1.5 rounded-full bg-red-500/30 z-10"></div>
-              <div className="absolute top-2 right-2 w-1.5 h-1.5 rounded-full bg-red-500/30 z-10"></div>
-              <div className="absolute bottom-2 left-2 w-1.5 h-1.5 rounded-full bg-red-500/30 z-10"></div>
-              <div className="absolute bottom-2 right-2 w-1.5 h-1.5 rounded-full bg-red-500/30 z-10"></div>
-            </>
-          )}
+              <span className="text-white font-black text-xl sm:text-3xl drop-shadow-[2px_2px_0_#000] -mt-1">2</span>
+            </div>
+          </div>
+
           {/* Holographic Top Glare */}
-          <div className="absolute top-0 left-0 right-0 h-1/2 bg-gradient-to-b from-white/40 via-white/10 to-transparent rounded-t-[1.125rem] pointer-events-none mix-blend-overlay z-20"></div>
+          <div className="absolute top-0 left-0 right-0 h-1/2 bg-gradient-to-b from-white/30 via-white/5 to-transparent rounded-t-[1.125rem] pointer-events-none mix-blend-overlay z-20"></div>
         </div>
       </motion.button>
     );

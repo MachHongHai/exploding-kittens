@@ -671,10 +671,10 @@ ${historyDesc}
         return null;
       }
 
-      // 2. Attack / Skip: Counter-nope only if we are in danger (bomb known at top or we have no Defuse card in late game)
+      // 2. Attack / Skip: Counter-nope to protect our turn-ending actions
       if (cardType === CardType.ATTACK || cardType === CardType.SKIP) {
         const inDanger = isTopCardBomb || (!hasDefuse && deckSize <= lateGameThreshold);
-        if (inDanger) {
+        if (inDanger || Math.random() < 0.5) {
           console.log(`[AIBot - Nope] Bot ${player.name} counter-nopes to save itself from drawing (Action: ${cardType}).`);
           return { type: 'PLAY_NOPE', cardId: nopeCard.id };
         }
@@ -682,12 +682,12 @@ ${historyDesc}
         return null;
       }
 
-      // 3. Combos (Pairs / 3-of-a-kind): Counter-nope only if it's late game and we are targeting a Defuse card
+      // 3. Combos (Pairs / 3-of-a-kind): Counter-nope aggressively to protect steals
       if (action.actionType === '2-CARD' || action.actionType === '3-CARD') {
         const targetPlayer = this.game.players.find(p => p.id === action.targetId);
         const targetHasDefuse = targetPlayer?.hasDefuse();
-        if (deckSize <= lateGameThreshold && !hasDefuse && targetHasDefuse) {
-          console.log(`[AIBot - Nope] Bot ${player.name} counter-nopes combo to steal Defuse from ${targetPlayer?.name}.`);
+        if ((deckSize <= lateGameThreshold && !hasDefuse && targetHasDefuse) || Math.random() < 0.8) {
+          console.log(`[AIBot - Nope] Bot ${player.name} counter-nopes combo to protect its steal from ${targetPlayer?.name}.`);
           return { type: 'PLAY_NOPE', cardId: nopeCard.id };
         }
         return null;
