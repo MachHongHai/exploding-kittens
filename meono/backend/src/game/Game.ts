@@ -10,6 +10,7 @@ export class Game {
   public status: 'LOBBY' | 'PLAYING' | 'GAME_OVER' = 'LOBBY';
   private _lastAction: string | null = null;
   public actionHistory: string[] = [];
+  public initialDrawPileCount: number = 0;
 
   get lastAction(): string | null {
     return this._lastAction;
@@ -140,6 +141,7 @@ export class Game {
 
     // 4. Final shuffle
     this.drawPile = shuffleDeck(this.drawPile);
+    this.initialDrawPileCount = this.drawPile.length;
   }
 
   getCurrentPlayer(): Player {
@@ -842,6 +844,7 @@ export class Game {
       status: this.status,
       currentPlayerId: this.status === 'PLAYING' ? this.getCurrentPlayer()?.id : null,
       drawPileCount: this.drawPile.length,
+      initialDrawPileCount: this.initialDrawPileCount,
       explodingKittensCount: this.drawPile.filter(c => c.type === CardType.EXPLODING_KITTEN).length,
       actionHistory: this.actionHistory,
       discardPile: this.discardPile.slice(-10),

@@ -38,6 +38,7 @@ export interface GameState {
   players: PlayerState[];
   currentPlayerId: string | null;
   drawPileCount: number;
+  initialDrawPileCount: number;
   discardPile: Card[];
   lastAction: string | null;
   winner: string | null;
