@@ -182,13 +182,17 @@ export class GameGateway {
       this.favorTimer = null;
     }
 
-    const hasActiveInteraction = this.game.pendingAction || this.game.waitingForTarget || this.game.waitingForSteal || this.game.waitingForFavor || this.game.waitingForDefuse;
+    const hasActiveInteraction = this.game.pendingAction || this.game.waitingForTarget || this.game.waitingForSteal || this.game.waitingForFavor || this.game.waitingForDefuse || this.game.playerSeeingFuture !== null;
     
     if (!hasActiveInteraction && !this.turnTimer) {
       this.startTurnTimer();
     } else if (hasActiveInteraction && this.turnTimer) {
       clearTimeout(this.turnTimer);
       this.turnTimer = null;
+      this.game.turnExpiresAt = undefined;
+    } else if (hasActiveInteraction && !this.turnTimer) {
+      // Ensure the frontend timer is cleared if there's an interaction but the timer was already null
+      this.game.turnExpiresAt = undefined;
     }
   }
 
@@ -260,17 +264,21 @@ export class GameGateway {
            clearTimeout(this.turnTimer);
            this.turnTimer = null;
         }
-        if (this.game.status === 'PLAYING') {
-           this.game.turnExpiresAt = Date.now() + 15000;
-        }
-
+        
         if (this.game.pendingAction) {
+          this.game.turnExpiresAt = undefined; // Pause AFK timer on frontend
           this.startNopeTimer();
           return actionResult; // Return immediately to let timer handle next steps
         }
         if (this.game.waitingForTarget) {
+          this.game.turnExpiresAt = undefined;
           this.startTargetTimer(playerId);
           return actionResult;
+        }
+
+        // Only restart the AFK timer if there is no interaction waiting
+        if (this.game.status === 'PLAYING') {
+           this.game.turnExpiresAt = Date.now() + 15000;
         }
       }
     } else if (action.type === 'SELECT_TARGET') {

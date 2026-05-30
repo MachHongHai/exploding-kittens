@@ -146,6 +146,16 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
   // Future logic
   const isSeeingFuture = !!gameState.futureCards;
 
+  // Auto-close See The Future after 3 seconds
+  useEffect(() => {
+    if (isSeeingFuture && gameState.futureCards) {
+      const timer = setTimeout(() => {
+        onAction({ type: 'CONFIRM_FUTURE' });
+      }, 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [isSeeingFuture, gameState.futureCards, onAction]);
+
   // Stealing logic
   const isStealer = gameState.waitingForSteal?.stealerId === socketId;
   const victimId = gameState.waitingForSteal?.victimId;
@@ -177,7 +187,16 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
   } else if (gameState.waitingForFavor?.victimId === socketId && gameState.waitingForFavor?.expiresAt) {
     activeExpiresAt = gameState.waitingForFavor.expiresAt;
     countdownLabel = 'Give a Card';
-  } else if (isMyTurn && gameState.turnExpiresAt) {
+  } else if (
+    isMyTurn && 
+    gameState.turnExpiresAt && 
+    !gameState.pendingAction &&
+    !gameState.waitingForTarget &&
+    !gameState.waitingForSteal &&
+    !gameState.waitingForFavor &&
+    !gameState.waitingForDefuse &&
+    !isSeeingFuture
+  ) {
     activeExpiresAt = gameState.turnExpiresAt;
     countdownLabel = 'Your Turn';
   }
@@ -1453,18 +1472,6 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
                     );
                  })}
               </div>
-
-              <motion.button 
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 1.2 }}
-                onClick={handleConfirmFuture}
-                whileHover={{ scale: 1.05, boxShadow: '0 0 40px rgba(168,85,247,0.5)' }}
-                whileTap={{ scale: 0.95 }}
-                className="px-12 py-4 rounded-full bg-gradient-to-r from-purple-600 to-pink-600 text-white font-cartoon uppercase tracking-widest shadow-2xl border border-purple-400/30 hover:from-purple-500 hover:to-pink-500 transition-all duration-300"
-              >
-                ✨ Got It ✨
-              </motion.button>
           </motion.div>
         )}
       </AnimatePresence>
