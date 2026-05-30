@@ -79,16 +79,20 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
       setIsShuffling(true);
       const timer = setTimeout(() => setIsShuffling(false), 2000);
       return () => clearTimeout(timer);
+    } else {
+      setIsShuffling(false);
     }
   }, [gameState.lastAction]);
 
   // Watch for player elimination
   useEffect(() => {
     const eliminated = gameState.players.find(p => p.isEliminated && p.id !== eliminatedPlayerId);
-    if (eliminated && gameState.lastAction?.includes('eliminated') || gameState.lastAction?.includes('exploded')) {
+    if (eliminated && (gameState.lastAction?.includes('eliminated') || gameState.lastAction?.includes('exploded'))) {
       setEliminatedPlayerId(eliminated?.id || null);
       const timer = setTimeout(() => setEliminatedPlayerId(null), 4000);
       return () => clearTimeout(timer);
+    } else if (!gameState.lastAction?.includes('eliminated') && !gameState.lastAction?.includes('exploded')) {
+      setEliminatedPlayerId(null);
     }
   }, [gameState.lastAction]);
 
@@ -100,6 +104,8 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
         const timer = setTimeout(() => setShowDefuseSuccess(false), 3000);
         return () => clearTimeout(timer);
       }
+    } else {
+      setShowDefuseSuccess(false);
     }
   }, [gameState.lastAction, gameState.waitingForDefuse]);
 
@@ -111,6 +117,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
     } else if (action.includes('Three') || action.includes('three') || action.includes('3 of')) {
       setComboEffect({ type: 'triple', count: 3 });
     } else {
+      setComboEffect(null);
       return;
     }
     const timer = setTimeout(() => setComboEffect(null), 2500);
@@ -139,6 +146,8 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
       setShowYourTurn(true);
       const timer = setTimeout(() => setShowYourTurn(false), 2000);
       return () => clearTimeout(timer);
+    } else {
+      setShowYourTurn(false);
     }
   }, [isMyTurn]);
 
