@@ -90,7 +90,9 @@ export class GameEngine {
   start() {
     if (this.players.length < 2) throw new Error("Not enough players");
     this.status = 'PLAYING';
-    this.currentPlayerIndex = 0;
+    
+    // Randomize the starting player
+    this.currentPlayerIndex = Math.floor(Math.random() * this.players.length);
     this.turnExpiresAt = Date.now() + 15000;
 
     // Create the deck based on deckType
@@ -435,9 +437,9 @@ export class GameEngine {
       return { success: true };
     }
 
-    // Case 5: Attack/Skip active turn change (current player plays Nope before drawing/playing)
+    // Case 5: Attack/Skip/Reverse active turn change (current player plays Nope before drawing/playing)
     if (this.lastNopeableAction &&
-      (this.lastNopeableAction.type === 'ATTACK' || this.lastNopeableAction.type === 'SKIP') &&
+      (this.lastNopeableAction.type === 'ATTACK' || this.lastNopeableAction.type === 'SKIP' || this.lastNopeableAction.type === 'REVERSE') &&
       this.currentPlayerIndex === this.players.findIndex(p => p.id === playerId) &&
       this.lastNopeableAction.prevPlayerIndex !== undefined &&
       this.lastNopeableAction.prevTurnsToPlay !== undefined) {
@@ -448,6 +450,11 @@ export class GameEngine {
       // Revert turn and turnsToPlay
       this.currentPlayerIndex = this.lastNopeableAction.prevPlayerIndex;
       this.players[this.currentPlayerIndex].turnsToPlay = this.lastNopeableAction.prevTurnsToPlay;
+      
+      // If it was a reverse, we also need to flip the direction back
+      if (this.lastNopeableAction.type === 'REVERSE') {
+        this.playDirection = this.playDirection === 1 ? -1 : 1;
+      }
 
       const initiator = this.players.find(p => p.id === this.lastNopeableAction!.initiatorId);
       this.lastAction = `${player.name} NOPED the ${this.lastNopeableAction.type}! Turn reverts to ${initiator?.name || 'previous player'}.`;

@@ -1,10 +1,9 @@
 import { GameEngine } from './GameEngine.js';
 import { askAIForMove, BotDecision } from '../services/ai-service.js';
 import { CardType, PlayerAction } from '../../../shared/src/types.js';
-import { ImplodingAIBot } from './expansions/ImplodingAIBot.js';
 
 export class OriginalAIBot {
-  private game: GameEngine;
+  protected game: GameEngine;
 
   constructor(game: GameEngine) {
     this.game = game;
@@ -24,11 +23,6 @@ export class OriginalAIBot {
     if (this.game.waitingForFavor?.victimId === botId) {
       const weakestCardId = this.chooseWeakestCard(player.hand);
       return { type: 'GIVE_CARD', requesterId: this.game.waitingForFavor.requesterId, cardId: weakestCardId };
-    }
-
-    if (this.game.playerAlteringFuture === botId) {
-      const decision = ImplodingAIBot.handleBotAlteringFuture(botId, this.game);
-      if (decision) return decision;
     }
 
     if (difficulty === 'PLAY_WITH_GEMINI') {
@@ -659,7 +653,7 @@ export class OriginalAIBot {
       .join(', ') || 'None';
 
     const bombInRangeIndex = player.knownDeckTop.findIndex((c: any, idx: number) => 
-      c.cardType === CardType.EXPLODING_KITTEN && idx < player.turnsToPlay
+      this.isBomb(c.cardType) && idx < player.turnsToPlay
     );
     const isBombDanger = bombInRangeIndex !== -1 || this.game.drawPile.length <= player.turnsToPlay;
 

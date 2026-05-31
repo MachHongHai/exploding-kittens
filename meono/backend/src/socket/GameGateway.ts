@@ -2,6 +2,7 @@ import { Server, Socket } from 'socket.io';
 import { GameEngine } from '../game/GameEngine.js';
 import { Player } from '../game/models.js';
 import { OriginalAIBot } from '../game/OriginalAIBot.js';
+import { ImplodingAIBot } from '../game/expansions/ImplodingAIBot.js';
 import { PlayerAction, CardType } from '../../../shared/src/types.js';
 import { ImplodingGameLogic } from '../game/expansions/ImplodingGameLogic.js';
 
@@ -9,7 +10,7 @@ export class GameGateway {
   private io: Server;
   // Simplified for demo: Single global game instance
   private game: GameEngine;
-  private botController: OriginalAIBot;
+  private botController: OriginalAIBot | ImplodingAIBot;
   private botDifficulty: 'EASY' | 'MEDIUM' | 'HARD' | 'PLAY_WITH_GEMINI' = 'EASY';
   private bombTimers: Map<string, NodeJS.Timeout> = new Map();
   private nopeTimer: NodeJS.Timeout | null = null;
@@ -38,7 +39,14 @@ export class GameGateway {
         this.clearAllTimers();
         // Reset game for demo purposes when a new player joins
         this.game = new GameEngine('match_1', data.deckType || 'ORIGINAL');
-        this.botController = new OriginalAIBot(this.game);
+        
+        // Choose the correct bot controller based on deck type
+        if (this.game.deckType === 'IMPLODING_KITTENS') {
+          this.botController = new ImplodingAIBot(this.game);
+        } else {
+          this.botController = new OriginalAIBot(this.game);
+        }
+        
         this.botDifficulty = data.difficulty;
 
         // Add human
@@ -54,6 +62,7 @@ export class GameGateway {
         console.log(`[GameEngine] Started with ${count} bots, difficulty ${this.botDifficulty}`);
 
         this.broadcastState();
+        this.checkStateTimers(); // Start the first turn timer
         this.checkBotTurn();
       });
 
