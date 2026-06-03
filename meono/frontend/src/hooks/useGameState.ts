@@ -25,7 +25,7 @@ export function useGameState() {
     };
   }, []);
 
-  const joinMatch = (name: string, difficulty: 'EASY' | 'MEDIUM' | 'HARD' | 'PLAY_WITH_GEMINI', botCount: number, deckType: 'ORIGINAL' | 'IMPLODING_KITTENS' = 'ORIGINAL') => {
+  const joinMatch = (name: string, difficulty: 'HARD' | 'PLAY_WITH_GEMINI', botCount: number, deckType: 'ORIGINAL' | 'IMPLODING_KITTENS' = 'ORIGINAL') => {
     if (socket) {
       setPlayerName(name);
       socket.emit('join_match', { name, difficulty, botCount, deckType });

@@ -9,7 +9,7 @@ export class OriginalAIBot {
     this.game = game;
   }
 
-  async takeTurn(botId: string, difficulty: 'EASY' | 'MEDIUM' | 'HARD' | 'PLAY_WITH_GEMINI', requiresDefuse: boolean = false): Promise<PlayerAction> {
+  async takeTurn(botId: string, difficulty: 'HARD' | 'PLAY_WITH_GEMINI', requiresDefuse: boolean = false): Promise<PlayerAction> {
     const player = this.game.players.find(p => p.id === botId);
     if (!player) throw new Error("Bot player not found");
 
@@ -27,12 +27,8 @@ export class OriginalAIBot {
 
     if (difficulty === 'PLAY_WITH_GEMINI') {
       return this.takeGeminiTurn(botId, requiresDefuse);
-    } else if (difficulty === 'HARD') {
-      return this.takeHardRuleTurn(botId, requiresDefuse);
-    } else if (difficulty === 'MEDIUM') {
-      return this.takeMediumTurn(botId, requiresDefuse);
     } else {
-      return this.takeEasyTurn(botId, requiresDefuse);
+      return this.takeHardRuleTurn(botId, requiresDefuse);
     }
   }
 
@@ -142,9 +138,12 @@ export class OriginalAIBot {
     return target.hand[0].type as CardType;
   }
 
-  private isBomb(cardType: string): boolean {
+  private isBomb(cardType: string, isFaceUp?: boolean): boolean {
     if (this.game.deckType === 'IMPLODING_KITTENS') {
-      return ImplodingAIBot.isBomb(cardType);
+      if (cardType === CardType.IMPLODING_KITTEN) {
+        return isFaceUp !== false;
+      }
+      return cardType === CardType.EXPLODING_KITTEN;
     }
     return cardType === CardType.EXPLODING_KITTEN;
   }
@@ -157,15 +156,44 @@ export class OriginalAIBot {
   private getLastResortAction(botId: string): PlayerAction | null {
     const player = this.game.players.find(p => p.id === botId)!;
     const hand = player.hand;
-    const isBombOnTop = (player.knownDeckTop.length > 0 && this.isBomb(player.knownDeckTop[0].cardType)) || (this.game as any).isTopCardSuspect;
+    const topCardOfDrawPile = this.game.drawPile[this.game.drawPile.length - 1];
+    const isFaceUpBombOnTop = topCardOfDrawPile && topCardOfDrawPile.isFaceUp && this.isBomb(topCardOfDrawPile.type, true);
+
+    const isBombOnTop = isFaceUpBombOnTop || (player.knownDeckTop.length > 0 && this.isBomb(player.knownDeckTop[0].cardType, player.knownDeckTop[0].isFaceUp)) || (this.game as any).isTopCardSuspect;
 
     if (!isBombOnTop) return null;
 
     if (this.game.deckType === 'IMPLODING_KITTENS') {
-      const expansionAction = ImplodingAIBot.getExpansionEscapeAction(botId, this.game);
-      if (expansionAction) {
-        console.log(`[Expert SAFETY] ${player.name}: Using expansion action to avoid bomb!`);
-        return expansionAction;
+      // 1. TARGETED ATTACK
+      const targetedAttack = hand.find(c => c.type === CardType.TARGETED_ATTACK);
+      if (targetedAttack) {
+        const victims = this.game.players.filter(p => p.id !== botId && !p.isEliminated);
+        const targetOpp = victims.find(v => !v.hasDefuse()) || victims[0];
+        if (targetOpp) {
+          console.log(`[Expert SAFETY] ${player.name}: Using Targeted Attack to escape bomb!`);
+          return { type: 'PLAY_CARDS', cardIds: [targetedAttack.id], targetId: targetOpp.id };
+        }
+      }
+
+      // 2. REVERSE
+      const reverse = hand.find(c => c.type === CardType.REVERSE);
+      if (reverse) {
+        console.log(`[Expert SAFETY] ${player.name}: Using Reverse to escape bomb!`);
+        return { type: 'PLAY_CARDS', cardIds: [reverse.id] };
+      }
+
+      // 3. DRAW FROM THE BOTTOM
+      const drawBottom = hand.find(c => c.type === CardType.DRAW_FROM_THE_BOTTOM);
+      if (drawBottom) {
+        console.log(`[Expert SAFETY] ${player.name}: Using Draw from the Bottom to escape bomb!`);
+        return { type: 'PLAY_CARDS', cardIds: [drawBottom.id] };
+      }
+
+      // 4. ALTER THE FUTURE
+      const alterFuture = hand.find(c => c.type === CardType.ALTER_THE_FUTURE_3X);
+      if (alterFuture) {
+        console.log(`[Expert SAFETY] ${player.name}: Using Alter the Future to escape bomb!`);
+        return { type: 'PLAY_CARDS', cardIds: [alterFuture.id] };
       }
     }
 
@@ -292,9 +320,10 @@ export class OriginalAIBot {
     if (opponents.length === 1) return opponents[0];
 
     // Find the next active player in the turn order
-    let nextIndex = (this.game.currentPlayerIndex + 1) % this.game.players.length;
+    const direction = this.game.playDirection || 1;
+    let nextIndex = (this.game.currentPlayerIndex + direction + this.game.players.length) % this.game.players.length;
     while (this.game.players[nextIndex].isEliminated) {
-      nextIndex = (nextIndex + 1) % this.game.players.length;
+      nextIndex = (nextIndex + direction + this.game.players.length) % this.game.players.length;
     }
     const nextPlayer = this.game.players[nextIndex];
 
@@ -423,9 +452,10 @@ export class OriginalAIBot {
 
     if (requiresDefuse) {
       // Find the next active player
-      let nextIndex = (this.game.currentPlayerIndex + 1) % this.game.players.length;
+      const direction = this.game.playDirection || 1;
+      let nextIndex = (this.game.currentPlayerIndex + direction + this.game.players.length) % this.game.players.length;
       while (this.game.players[nextIndex].isEliminated) {
-        nextIndex = (nextIndex + 1) % this.game.players.length;
+        nextIndex = (nextIndex + direction + this.game.players.length) % this.game.players.length;
       }
       const nextPlayer = this.game.players[nextIndex];
       
@@ -450,19 +480,26 @@ export class OriginalAIBot {
     const alivePlayers = this.game.players.filter(p => !p.isEliminated).length;
     const remainingCards = this.game.drawPile.length;
     const isEndGame = remainingCards <= alivePlayers * 2.5;
+    const isEarlyGame = remainingCards > alivePlayers * 4.5;
 
     // Bomb knowledge from See The Future memory or public suspicion
-    const isBombOnTop = (player.knownDeckTop.length > 0 &&
-                        this.isBomb(player.knownDeckTop[0].cardType)) ||
+    const topCardOfDrawPile = this.game.drawPile[this.game.drawPile.length - 1];
+    const isFaceUpBombOnTop = topCardOfDrawPile && topCardOfDrawPile.isFaceUp && this.isBomb(topCardOfDrawPile.type, true);
+
+    // Bomb knowledge from See The Future memory or public suspicion
+    const isBombOnTop = isFaceUpBombOnTop || 
+                        (player.knownDeckTop.length > 0 &&
+                        this.isBomb(player.knownDeckTop[0].cardType, player.knownDeckTop[0].isFaceUp)) ||
                         (this.game as any).isTopCardSuspect;
     
-    const isTopCardSafe = player.knownDeckTop.length > 0 &&
-                          !this.isBomb(player.knownDeckTop[0].cardType) &&
+    const isTopCardSafe = !isFaceUpBombOnTop &&
+                          player.knownDeckTop.length > 0 &&
+                          !this.isBomb(player.knownDeckTop[0].cardType, player.knownDeckTop[0].isFaceUp) &&
                           player.knownDeckTop[0].cardType !== 'UNKNOWN' &&
                           !(this.game as any).isTopCardSuspect;
 
-    const bombInRangeIndex = player.knownDeckTop.findIndex((c: any, idx: number) => 
-      this.isBomb(c.cardType) && 
+    const bombInRangeIndex = isFaceUpBombOnTop ? 0 : player.knownDeckTop.findIndex((c: any, idx: number) => 
+      this.isBomb(c.cardType, c.isFaceUp) && 
       idx < player.turnsToPlay
     );
     const isBombKnown = bombInRangeIndex !== -1;
@@ -483,6 +520,24 @@ export class OriginalAIBot {
     // If top card is safe, save cards and draw!
     if (isTopCardSafe) {
       console.log(`[AIBot - Medium] Top card is safe. Saving cards and drawing.`);
+      return { type: 'DRAW_CARD' };
+    }
+
+    // EARLY GAME BOMB + SHUFFLE PRIORITIZATION:
+    // If we are in early game, in bomb danger, and have a shuffle card,
+    // play Shuffle first to randomize the bomb and save skip/attack/see-the-future.
+    if (isEarlyGame && isBombDanger && shuffleCard && remainingCards > 1) {
+      console.log(`[AIBot - Medium] Bot ${player.name} prioritizes Shuffle in early game bomb danger to save cards.`);
+      return { type: 'PLAY_CARDS', cardIds: [shuffleCard.id] };
+    }
+
+    // LOW-RISK ATTACK DRAW PRIORITIZATION:
+    // If we are attacked in early game or have a defuse (low risk) and no bomb is known on top,
+    // draw cards to accumulate resources instead of playing defensive actions.
+    const isAttacked = player.turnsToPlay > 1;
+    const riskIsLow = !isBombDanger && (isEarlyGame || player.hasDefuse());
+    if (isAttacked && riskIsLow) {
+      console.log(`[AIBot - Medium] Bot ${player.name} is attacked but risk is low. Prioritizing drawing cards to accumulate resources.`);
       return { type: 'DRAW_CARD' };
     }
 
@@ -580,6 +635,11 @@ export class OriginalAIBot {
   private async takeGeminiTurn(botId: string, requiresDefuse: boolean): Promise<PlayerAction> {
     const player = this.game.players.find(p => p.id === botId)!;
     
+    if (requiresDefuse) {
+      console.log(`[AIBot - Gemini] Bot ${player.name} needs to Defuse. Bypassing Gemini to prevent timeouts.`);
+      return this.takeMediumTurn(botId, true);
+    }
+    
     // OPTIMIZATION: If not forced to Defuse, and has no playable action cards or pairs, draw automatically to save quota
     if (!requiresDefuse) {
       const hasSinglePlayable = player.hand.some(c => 
@@ -652,8 +712,11 @@ export class OriginalAIBot {
       .map(([name, count]) => `${name} (Attacked/Noped you ${count} times)`)
       .join(', ') || 'None';
 
-    const bombInRangeIndex = player.knownDeckTop.findIndex((c: any, idx: number) => 
-      this.isBomb(c.cardType) && idx < player.turnsToPlay
+    const topCardOfDrawPile = this.game.drawPile[this.game.drawPile.length - 1];
+    const isFaceUpBombOnTop = topCardOfDrawPile && topCardOfDrawPile.isFaceUp && this.isBomb(topCardOfDrawPile.type, true);
+
+    const bombInRangeIndex = isFaceUpBombOnTop ? 0 : player.knownDeckTop.findIndex((c: any, idx: number) => 
+      this.isBomb(c.cardType, c.isFaceUp) && idx < player.turnsToPlay
     );
     const isBombDanger = bombInRangeIndex !== -1 || this.game.drawPile.length <= player.turnsToPlay;
 
@@ -701,7 +764,7 @@ ${historyDesc}
     return this.takeMediumTurn(botId, requiresDefuse);
   }
 
-  public async takeNopeDecision(botId: string, difficulty: 'EASY' | 'MEDIUM' | 'HARD' | 'PLAY_WITH_GEMINI'): Promise<PlayerAction | null> {
+  public async takeNopeDecision(botId: string, difficulty: 'HARD' | 'PLAY_WITH_GEMINI'): Promise<PlayerAction | null> {
     const player = this.game.players.find(p => p.id === botId);
     if (!player || !this.game.pendingAction) return null;
 
@@ -713,20 +776,17 @@ ${historyDesc}
     const handSize = player.handCount;
     const hasDefuse = player.hand.some(c => c.type === CardType.DEFUSE);
     
-    const isTopCardBomb = player.knownDeckTop.length > 0 && 
-                          player.knownDeckTop[0].cardType === CardType.EXPLODING_KITTEN;
+    const topCardOfDrawPile = this.game.drawPile[this.game.drawPile.length - 1];
+    const isFaceUpBombOnTop = topCardOfDrawPile && topCardOfDrawPile.isFaceUp && this.isBomb(topCardOfDrawPile.type, true);
+
+    const isTopCardBomb = isFaceUpBombOnTop || (player.knownDeckTop.length > 0 && 
+                          this.isBomb(player.knownDeckTop[0].cardType, player.knownDeckTop[0].isFaceUp));
 
     const aliveCount = this.game.players.filter(p => !p.isEliminated).length;
     const isEarlyGame = deckSize > aliveCount * 4.5;
     const lateGameThreshold = Math.ceil(aliveCount * 2.5);
 
-    // Easy bots: simple 25% chance of noping if targeted, never counter-nope
-    if (difficulty === 'EASY') {
-      if (action.playerId !== botId && action.nopeCount === 0 && action.targetId === botId && Math.random() < 0.25) {
-        return { type: 'PLAY_NOPE', cardId: nopeCard.id };
-      }
-      return null;
-    }
+
 
     // --- CASE 1: COUNTER-NOPING (YUP) to protect our own action ---
     if (action.playerId === botId) {
@@ -848,9 +908,10 @@ ${historyDesc}
 
       if (cardType === CardType.ATTACK) {
         // Determine if we are the victim of the attack
-        let nextIndex = (this.game.currentPlayerIndex + 1) % this.game.players.length;
+        const direction = this.game.playDirection || 1;
+        let nextIndex = (this.game.currentPlayerIndex + direction + this.game.players.length) % this.game.players.length;
         while (this.game.players[nextIndex].isEliminated) {
-          nextIndex = (nextIndex + 1) % this.game.players.length;
+          nextIndex = (nextIndex + direction + this.game.players.length) % this.game.players.length;
         }
         isTargetedOrNext = (this.game.players[nextIndex].id === botId);
       } else {
@@ -1016,9 +1077,10 @@ ${historyDesc}
       }
 
       // This is our last draw. Next player will draw after us.
-      let nextIndex = (this.game.currentPlayerIndex + 1) % this.game.players.length;
+      const direction = this.game.playDirection || 1;
+      let nextIndex = (this.game.currentPlayerIndex + direction + this.game.players.length) % this.game.players.length;
       while (this.game.players[nextIndex].isEliminated) {
-        nextIndex = (nextIndex + 1) % this.game.players.length;
+        nextIndex = (nextIndex + direction + this.game.players.length) % this.game.players.length;
       }
       const nextPlayer = this.game.players[nextIndex];
 
@@ -1042,15 +1104,20 @@ ${historyDesc}
     // Bomb knowledge from See The Future memory
     // IMPORTANT: 'UNKNOWN' entries in knownDeckTop are padding (we DON'T know what's there).
     // Only cards positively identified via See The Future count as "known safe".
-    const isBombOnTop = (player.knownDeckTop.length > 0 &&
-                        this.isBomb(player.knownDeckTop[0].cardType)) ||
+    const topCardOfDrawPile = this.game.drawPile[this.game.drawPile.length - 1];
+    const isFaceUpBombOnTop = topCardOfDrawPile && topCardOfDrawPile.isFaceUp && this.isBomb(topCardOfDrawPile.type, true);
+
+    const isBombOnTop = isFaceUpBombOnTop || 
+                        (player.knownDeckTop.length > 0 &&
+                        this.isBomb(player.knownDeckTop[0].cardType, player.knownDeckTop[0].isFaceUp)) ||
                         (this.game as any).isTopCardSuspect;
-    const isTopCardSafe = player.knownDeckTop.length > 0 &&
-                          !this.isBomb(player.knownDeckTop[0].cardType) &&
+    const isTopCardSafe = !isFaceUpBombOnTop &&
+                          player.knownDeckTop.length > 0 &&
+                          !this.isBomb(player.knownDeckTop[0].cardType, player.knownDeckTop[0].isFaceUp) &&
                           player.knownDeckTop[0].cardType !== 'UNKNOWN' &&
                           !(this.game as any).isTopCardSuspect;
-    const bombInDrawRange = player.knownDeckTop.findIndex((c: any, idx: number) =>
-      this.isBomb(c.cardType) && 
+    const bombInDrawRange = isFaceUpBombOnTop || player.knownDeckTop.findIndex((c: any, idx: number) =>
+      this.isBomb(c.cardType, c.isFaceUp) && 
       idx < player.turnsToPlay
     ) !== -1;
 
@@ -1122,6 +1189,23 @@ ${historyDesc}
     // RULE 1: UNDER ATTACK (turnsToPlay > 1)
     // ==========================================
     if (player.turnsToPlay > 1) {
+      // 1a_new. EARLY GAME BOMB + SHUFFLE PRIORITIZATION:
+      // If we are in early game, in bomb danger (danger zone), and have a shuffle card,
+      // play Shuffle first to randomize the bomb and save skip/attack/see-the-future.
+      if (isEarlyGame && isDangerZone && shuffleCards.length > 0 && deckSize > 1) {
+        console.log(`[Expert] ${player.name}: Prioritizing Shuffle under attack in early game bomb danger to save escape cards.`);
+        return { type: 'PLAY_CARDS', cardIds: [shuffleCards[0].id] };
+      }
+
+      // 1b_new. LOW-RISK ATTACK DRAW PRIORITIZATION:
+      // If we are attacked in early game or have a defuse (low risk) and no bomb is known on top,
+      // draw cards to accumulate resources instead of playing defensive actions.
+      const riskIsLow = !isDangerZone && (isEarlyGame || hasDefuse);
+      if (riskIsLow) {
+        console.log(`[Expert] ${player.name}: Attacked but risk is low. Prioritizing drawing cards to accumulate resources.`);
+        return this.getLastResortAction(botId) || { type: 'DRAW_CARD' };
+      }
+
       // 1a. CHAIN ATTACK (offensive counter) - force pressure back onto opponents
       if (attackCards.length > 0) {
         console.log(`[Expert] ${player.name}: CHAIN ATTACK! Reflecting attack pressure back.`);
@@ -1176,6 +1260,13 @@ ${historyDesc}
     // RULE 2: BOMB IMMINENT (confirmed or strongly suspected)
     // ==========================================
     if (isDangerZone) {
+      // 2a_new. EARLY GAME BOMB + SHUFFLE PRIORITIZATION:
+      // In early game with a bomb danger, prioritize playing Shuffle first to save crucial escape cards.
+      if (isEarlyGame && shuffleCards.length > 0 && deckSize > 1) {
+        console.log(`[Expert] ${player.name}: Prioritizing Shuffle in early game bomb danger to save escape cards.`);
+        return { type: 'PLAY_CARDS', cardIds: [shuffleCards[0].id] };
+      }
+
       const threatLevel = isBombOnTop ? 'CONFIRMED ON TOP' : (bombInDrawRange ? 'IN DRAW RANGE' : 'SUSPECTED');
       console.log(`[Expert] ${player.name}: BOMB ${threatLevel}! Survival protocol activated.`);
 
@@ -1287,9 +1378,10 @@ ${historyDesc}
     // RULE 3.5: OFFENSIVE REVENGE (The Grudge System)
     // ==========================================
     // If the next player has severely wronged us recently, punish them with an Attack.
-    let nextIdx = (this.game.currentPlayerIndex + 1) % this.game.players.length;
+    const direction = this.game.playDirection || 1;
+    let nextIdx = (this.game.currentPlayerIndex + direction + this.game.players.length) % this.game.players.length;
     while (this.game.players[nextIdx].isEliminated) {
-      nextIdx = (nextIdx + 1) % this.game.players.length;
+      nextIdx = (nextIdx + direction + this.game.players.length) % this.game.players.length;
     }
     const nextPlayerObj = this.game.players[nextIdx];
     

@@ -7,7 +7,7 @@ export class Player {
   public isBot: boolean;
   public turnsToPlay: number = 1;
   public isEliminated: boolean = false;
-  public knownDeckTop: { cardType: string; cardName: string }[] = [];
+  public knownDeckTop: { cardType: string; cardName: string; isFaceUp?: boolean }[] = [];
 
   constructor(id: string, name: string, isBot: boolean = false) {
     this.id = id;

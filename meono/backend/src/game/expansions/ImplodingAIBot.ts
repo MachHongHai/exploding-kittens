@@ -1,71 +1,82 @@
 import { GameEngine } from '../GameEngine.js';
 import { Card, CardType, PlayerAction } from '../../../../shared/src/types.js';
+import { OriginalAIBot } from '../OriginalAIBot.js';
 
 /**
  * ImplodingAIBot handles all AI logic specific to the Imploding Kittens expansion.
  * It provides specialized tactical decision-making for expansion cards and ensures
  * bots treat Imploding Kittens (face-up and face-down) as lethal threats.
  */
-export class ImplodingAIBot {
-  private game: GameEngine;
+export class ImplodingAIBot extends OriginalAIBot {
 
   constructor(game: GameEngine) {
-    this.game = game;
+    super(game);
   }
 
   /**
    * Centralized check for lethal kittens (Exploding or Imploding).
    */
-  static isBomb(cardType: string): boolean {
-    return cardType === CardType.EXPLODING_KITTEN || cardType === CardType.IMPLODING_KITTEN;
+  static isBomb(cardType: string, isFaceUp?: boolean): boolean {
+    if (cardType === CardType.EXPLODING_KITTEN) return true;
+    if (cardType === CardType.IMPLODING_KITTEN) {
+      return isFaceUp !== false;
+    }
+    return false;
   }
 
   /**
    * Main entry point for expansion-specific turn logic.
    * Note: This is called by OriginalAIBot to handle expansion-specific states.
    */
-  async takeTurn(botId: string, difficulty: 'EASY' | 'MEDIUM' | 'HARD' | 'PLAY_WITH_GEMINI', requiresDefuse: boolean = false): Promise<PlayerAction | null> {
+  async takeTurn(botId: string, difficulty: 'HARD' | 'PLAY_WITH_GEMINI', requiresDefuse: boolean = false): Promise<PlayerAction> {
     const player = this.game.players.find(p => p.id === botId);
-    if (!player) return null;
+    if (!player) throw new Error("Bot player not found");
+
+    const isWaitingForDefuse = this.game.waitingForDefuse === botId;
+    const isWaitingForImplodeInsert = this.game.waitingForImplodingInsert === botId;
 
     // 1. Handle special expansion-only states
     if (this.game.playerAlteringFuture === botId) {
-      return ImplodingAIBot.handleBotAlteringFuture(botId, this.game);
+      const alterAction = ImplodingAIBot.handleBotAlteringFuture(botId, this.game);
+      if (alterAction) return alterAction;
     }
 
     // 2. High-priority threat detection (Kittens on top)
     const knownTop = player.knownDeckTop;
-    const isBombOnTop = (knownTop.length > 0 && ImplodingAIBot.isBomb(knownTop[0].cardType)) || (this.game as any).isTopCardSuspect;
+    const topCardOfDrawPile = this.game.drawPile[this.game.drawPile.length - 1];
+    const isFaceUpBombOnTop = topCardOfDrawPile && topCardOfDrawPile.isFaceUp && ImplodingAIBot.isBomb(topCardOfDrawPile.type, true);
 
-    if (isBombOnTop && difficulty !== 'EASY') {
+    const isBombOnTop = isFaceUpBombOnTop || (knownTop.length > 0 && ImplodingAIBot.isBomb(knownTop[0].cardType, knownTop[0].isFaceUp)) || (this.game as any).isTopCardSuspect;
+
+    if (isBombOnTop) {
       const escapeAction = ImplodingAIBot.getExpansionEscapeAction(botId, this.game);
       if (escapeAction) return escapeAction;
     }
 
     // 3. Specific card-type usage (Expansion cards)
-    if (difficulty !== 'EASY' && !requiresDefuse) {
+    if (!isWaitingForDefuse && !isWaitingForImplodeInsert) {
       const expansionAction = this.takeExpansionTacticalTurn(botId, difficulty);
       if (expansionAction) return expansionAction;
     }
 
     // 4. Defuse/Implode Insert logic
-    if (requiresDefuse) {
+    if (isWaitingForImplodeInsert) {
       return this.handleImplodingInsert(botId, difficulty);
     }
 
-    return null; // Fallback to OriginalAIBot for standard cards
+    if (isWaitingForDefuse) {
+      return super.takeTurn(botId, difficulty, true);
+    }
+
+    return super.takeTurn(botId, difficulty, requiresDefuse); // Fallback to OriginalAIBot for standard cards
   }
 
   /**
    * Handles the placement of an Imploding Kitten back into the deck.
    */
-  private handleImplodingInsert(botId: string, difficulty: string): PlayerAction {
+  private handleImplodingInsert(botId: string, difficulty: 'HARD' | 'PLAY_WITH_GEMINI'): PlayerAction {
     const player = this.game.players.find(p => p.id === botId)!;
     const deckSize = this.game.drawPile.length;
-
-    if (difficulty === 'EASY') {
-      return { type: 'IMPLODE_INSERT', insertIndex: Math.floor(Math.random() * Math.min(5, deckSize + 1)) };
-    }
 
     // Expert/Medium: Try to hit another player
     const remainingDraws = player.turnsToPlay - 1;
@@ -84,7 +95,7 @@ export class ImplodingAIBot {
   /**
    * Decide how to use expansion cards when NOT in immediate bomb danger.
    */
-  private takeExpansionTacticalTurn(botId: string, difficulty: string): PlayerAction | null {
+  private takeExpansionTacticalTurn(botId: string, difficulty: 'HARD' | 'PLAY_WITH_GEMINI'): PlayerAction | null {
     const player = this.game.players.find(p => p.id === botId)!;
     const hand = player.hand;
     const deckSize = this.game.drawPile.length;
@@ -151,8 +162,8 @@ export class ImplodingAIBot {
     if (game.playerAlteringFuture !== botId || !game.alteringFutureCards) return null;
 
     const sortedCards = [...game.alteringFutureCards].sort((a, b) => {
-      const isABomb = this.isBomb(a.type);
-      const isBBomb = this.isBomb(b.type);
+      const isABomb = this.isBomb(a.type, a.isFaceUp);
+      const isBBomb = this.isBomb(b.type, b.isFaceUp);
       
       if (isABomb && !isBBomb) return 1; // Put bombs at the bottom
       if (!isABomb && isBBomb) return -1;

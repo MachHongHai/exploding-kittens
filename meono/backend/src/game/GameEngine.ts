@@ -20,6 +20,7 @@ export class GameEngine {
   private lastSTFPlayerId: string | null = null;
   public turnExpiresAt?: number;
   public waitingForDefuse: string | null = null;
+  public winner: string | null = null;
   
   get lastAction(): string | null {
     return this._lastAction;
@@ -28,8 +29,19 @@ export class GameEngine {
   set lastAction(value: string | null) {
     this._lastAction = value;
     if (value) {
-      // Prevent duplicate consecutive entries
-      if (this.actionHistory.length === 0 || this.actionHistory[this.actionHistory.length - 1] !== value) {
+      // Prevent duplicate consecutive entries except for gameplay-related events (e.g. drawing multiple cards)
+      const isGameplayEvent = value.includes('drew') || 
+                              value.includes('played') || 
+                              value.includes('defused') || 
+                              value.includes('placed') || 
+                              value.includes('stole') || 
+                              value.includes('guessed') || 
+                              value.includes('gave') ||
+                              value.includes('skipped') ||
+                              value.includes('shuffled') ||
+                              value.includes('reversed');
+                              
+      if (isGameplayEvent || this.actionHistory.length === 0 || this.actionHistory[this.actionHistory.length - 1] !== value) {
         this.actionHistory.push(value);
         if (this.actionHistory.length > 30) {
           this.actionHistory.shift();
@@ -60,7 +72,7 @@ export class GameEngine {
   public lastDefuseAction: { playerId: string; drawsSinceDefuse: number } | null = null;
   public bombCountdown: number | undefined;
   public lastNopeableAction: {
-    type: 'ATTACK' | 'SKIP' | 'FAVOR' | '2-CARD' | '3-CARD' | 'NOPE';
+    type: 'ATTACK' | 'SKIP' | 'FAVOR' | '2-CARD' | '3-CARD' | 'NOPE' | 'REVERSE';
     initiatorId: string;
     targetId: string;
     timestamp: number;
@@ -234,11 +246,11 @@ export class GameEngine {
       if (card.type === CardType.NOPE) return { success: false, message: "Nope cards must be played during an Action Window!" };
       if (card.type === CardType.DEFUSE || card.type === CardType.EXPLODING_KITTEN || card.type === CardType.IMPLODING_KITTEN) return { success: false, message: "Cannot play this card normally!" };
 
-      if (card.type === CardType.FAVOR && !targetId) {
+      if ((card.type === CardType.FAVOR || card.type === CardType.TARGETED_ATTACK) && !targetId) {
         cards.forEach(c => player.removeCard(c.id) && this.discardPile.push(c));
-        this.lastAction = `${player.name} played Favor!`;
+        this.lastAction = `${player.name} played ${card.name}!`;
         this.waitingForTarget = {
-          type: 'FAVOR',
+          type: card.type === CardType.FAVOR ? 'FAVOR' : 'TARGETED_ATTACK',
           playerId,
           cardIds,
           expiresAt: Date.now() + 12500
@@ -667,7 +679,7 @@ export class GameEngine {
         case CardType.SEE_THE_FUTURE:
           // No additional log needed, keep the "played See The Future!" log
           const top3 = this.drawPile.slice(-3).reverse();
-          player.knownDeckTop = top3.map(c => ({ cardType: c.type, cardName: c.name }));
+          player.knownDeckTop = top3.map(c => ({ cardType: c.type, cardName: c.name, isFaceUp: c.isFaceUp }));
           this.lastSTFPlayerId = player.id; // Track that this player saw the future
           this.isTopCardSuspect = false; // Reset suspicion until they skip/attack
           if (!player.isBot) {
@@ -692,21 +704,42 @@ export class GameEngine {
             if (this.lastSTFPlayerId === player.id) {
               this.isTopCardSuspect = true;
             }
+            const reversePrevIndex = this.currentPlayerIndex;
+            const reversePrevTurns = player.turnsToPlay;
+
             ImplodingGameLogic.handleReverse(this, player);
+
+            this.lastNopeableAction = {
+              type: 'REVERSE',
+              initiatorId: player.id,
+              targetId: this.getCurrentPlayer().id,
+              timestamp: Date.now(),
+              prevPlayerIndex: reversePrevIndex,
+              prevTurnsToPlay: reversePrevTurns
+            };
           }
           break;
         case CardType.TARGETED_ATTACK:
           if (this.deckType === 'IMPLODING_KITTENS') {
-            // Put into target selection mode (player picks who to attack)
-            this.waitingForTarget = {
-              type: 'TARGETED_ATTACK',
-              playerId: player.id,
-              cardIds: action.cards.map(c => c.id),
-              expiresAt: Date.now() + 12500
-            };
-            this.lastAction = `Select a target for ${player.name}'s Targeted Attack...`;
-            // Don't resolve yet — wait for SELECT_TARGET
-            return;
+            const attackTarget = this.players.find(p => p.id === action.targetId);
+            if (attackTarget) {
+              if (this.lastSTFPlayerId === player.id) {
+                this.isTopCardSuspect = true;
+              }
+              const attackPrevIndex = this.currentPlayerIndex;
+              const attackPrevTurns = player.turnsToPlay;
+
+              ImplodingGameLogic.resolveTargetedAttack(this, player, attackTarget);
+
+              this.lastNopeableAction = {
+                type: 'ATTACK',
+                initiatorId: player.id,
+                targetId: attackTarget.id,
+                timestamp: Date.now(),
+                prevPlayerIndex: attackPrevIndex,
+                prevTurnsToPlay: attackPrevTurns
+              };
+            }
           }
           break;
         case CardType.FAVOR:
@@ -986,24 +1019,15 @@ export class GameEngine {
     const { type, cardIds } = this.waitingForTarget;
     const cards = this.discardPile.filter(c => cardIds.includes(c.id));
 
-    // Handle TARGETED_ATTACK separately
-    if (type === 'TARGETED_ATTACK') {
-      if (this.lastSTFPlayerId === playerId) {
-        this.isTopCardSuspect = true;
-      }
-      ImplodingGameLogic.resolveTargetedAttack(this, player, target);
-      return;
-    }
-
-    const typeLabel = type === 'FAVOR' ? 'Favor' : type === '2-CARD' ? 'Pair' : '3 of a Kind';
+    const typeLabel = type === 'FAVOR' ? 'Favor' : type === 'TARGETED_ATTACK' ? 'Targeted Attack' : type === '2-CARD' ? 'Pair' : '3 of a Kind';
     this.lastAction = `${player.name} targeted ${target.name} for ${typeLabel}${isTimeout ? ' (Timeout)' : ''}!`;
 
-    const actionName = type === 'FAVOR' ? 'Favor' : type === '2-CARD' ? 'Pair' : 'Three of a kind';
+    const actionName = type === 'FAVOR' ? 'Favor' : type === 'TARGETED_ATTACK' ? 'Targeted Attack' : type === '2-CARD' ? 'Pair' : 'Three of a kind';
     this.pendingAction = {
       actionId: generateCardId(),
       playerId,
       actionName,
-      actionType: type === 'FAVOR' ? '1-CARD' : type,
+      actionType: (type === 'FAVOR' || type === 'TARGETED_ATTACK') ? '1-CARD' : type,
       cards,
       targetId,
       requestedCardType,

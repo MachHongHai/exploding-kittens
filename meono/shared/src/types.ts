@@ -91,7 +91,7 @@ export interface GameState {
   explodingKittensCount?: number;
   actionHistory?: string[];
   lastNopeableAction?: {
-    type: 'ATTACK' | 'SKIP' | 'FAVOR' | '2-CARD' | '3-CARD' | 'NOPE';
+    type: 'ATTACK' | 'SKIP' | 'FAVOR' | '2-CARD' | '3-CARD' | 'NOPE' | 'REVERSE';
     initiatorId: string;
     targetId: string;
     timestamp: number;

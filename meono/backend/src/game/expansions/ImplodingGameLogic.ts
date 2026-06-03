@@ -75,7 +75,7 @@ export class ImplodingGameLogic {
     while (player.knownDeckTop.length < pos) {
       player.knownDeckTop.push({ cardType: 'UNKNOWN', cardName: 'Unknown Card' });
     }
-    player.knownDeckTop.splice(pos, 0, { cardType: CardType.IMPLODING_KITTEN, cardName: 'Imploding Kitten' });
+    player.knownDeckTop.splice(pos, 0, { cardType: CardType.IMPLODING_KITTEN, cardName: 'Imploding Kitten', isFaceUp: true });
 
     // Invalidate other players' memories since cards shifted
     game.players.forEach(p => {
@@ -85,6 +85,7 @@ export class ImplodingGameLogic {
     });
 
     game.lastAction = `${player.name} placed the Imploding Kitten back face-up.`;
+    game.lastDefuseAction = { playerId, drawsSinceDefuse: 0 };
 
     game.waitingForImplodingInsert = null;
     player.turnsToPlay = 0; // Turn ends immediately after placing it back
@@ -128,7 +129,7 @@ export class ImplodingGameLogic {
     game.drawPile.push(...[...reorderedCards].reverse());
 
     // Update knownDeckTop
-    player.knownDeckTop = reorderedCards.map(c => ({ cardType: c.type, cardName: c.name }));
+    player.knownDeckTop = reorderedCards.map(c => ({ cardType: c.type, cardName: c.name, isFaceUp: c.isFaceUp }));
 
     game.playerAlteringFuture = null;
     game.alteringFutureCards = [];

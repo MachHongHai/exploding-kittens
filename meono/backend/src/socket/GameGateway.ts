@@ -11,7 +11,7 @@ export class GameGateway {
   // Simplified for demo: Single global game instance
   private game: GameEngine;
   private botController: OriginalAIBot | ImplodingAIBot;
-  private botDifficulty: 'EASY' | 'MEDIUM' | 'HARD' | 'PLAY_WITH_GEMINI' = 'EASY';
+  private botDifficulty: 'HARD' | 'PLAY_WITH_GEMINI' = 'HARD';
   private bombTimers: Map<string, NodeJS.Timeout> = new Map();
   private nopeTimer: NodeJS.Timeout | null = null;
   private targetTimer: NodeJS.Timeout | null = null;
@@ -35,7 +35,7 @@ export class GameGateway {
     this.io.on('connection', (socket: Socket) => {
       console.log(`[Socket] Client connected: ${socket.id}`);
 
-      socket.on('join_match', (data: { name: string, difficulty: 'EASY' | 'MEDIUM' | 'HARD' | 'PLAY_WITH_GEMINI', botCount?: number, deckType?: 'ORIGINAL' | 'IMPLODING_KITTENS' }) => {
+      socket.on('join_match', (data: { name: string, difficulty: 'HARD' | 'PLAY_WITH_GEMINI', botCount?: number, deckType?: 'ORIGINAL' | 'IMPLODING_KITTENS' }) => {
         this.clearAllTimers();
         // Reset game for demo purposes when a new player joins
         this.game = new GameEngine('match_1', data.deckType || 'ORIGINAL');
@@ -131,41 +131,21 @@ export class GameGateway {
       // Save info about the pending action before resolving
       const pendingCardType = this.game.pendingAction?.cards[0]?.type;
       const pendingPlayerId = this.game.pendingAction?.playerId;
+      const isNoped = this.game.pendingAction ? (this.game.pendingAction.nopeCount % 2 !== 0) : false;
       
       this.game.resolvePendingAction();
       this.nopeTimer = null;
       this.checkStateTimers();
       this.broadcastState();
       
-      // If the resolved card was DRAW_FROM_THE_BOTTOM, auto-draw from bottom
-      if (pendingCardType === 'DRAW_FROM_THE_BOTTOM' && pendingPlayerId && this.game.status === 'PLAYING' && !this.game.waitingForTarget) {
+      // If the resolved card was DRAW_FROM_THE_BOTTOM and was NOT Noped, auto-draw from bottom
+      if (!isNoped && pendingCardType === 'DRAW_FROM_THE_BOTTOM' && pendingPlayerId && this.game.status === 'PLAYING' && !this.game.waitingForTarget) {
         // Small delay for animation
         setTimeout(async () => {
           if (this.game.status === 'PLAYING') {
             await this.processAction(pendingPlayerId, { type: 'DRAW_FROM_BOTTOM' });
           }
         }, 1000);
-        return;
-      }
-
-      // If the resolved card was TARGETED_ATTACK, start target timer
-      if (this.game.waitingForTarget?.type === 'TARGETED_ATTACK') {
-        const targetPlayerId = this.game.waitingForTarget.playerId;
-        const player = this.game.players.find(p => p.id === targetPlayerId);
-        if (player?.isBot) {
-          // Bot auto-selects target
-          setTimeout(async () => {
-            if (this.game.waitingForTarget?.type === 'TARGETED_ATTACK') {
-              const opponents = this.game.players.filter(p => p.id !== targetPlayerId && !p.isEliminated);
-              if (opponents.length > 0) {
-                const target = opponents[Math.floor(Math.random() * opponents.length)];
-                await this.processAction(targetPlayerId, { type: 'SELECT_TARGET', targetId: target.id });
-              }
-            }
-          }, 2000);
-        } else {
-          this.startTargetTimer(targetPlayerId);
-        }
         return;
       }
 
@@ -296,9 +276,35 @@ export class GameGateway {
 
   private startAlterFutureTimer() {
     if (this.alterFutureTimer) clearTimeout(this.alterFutureTimer);
+    
+    const playerId = this.game.playerAlteringFuture;
+    if (!playerId) return;
+    const player = this.game.players.find(p => p.id === playerId);
+
+    if (player?.isBot) {
+      this.alterFutureTimer = setTimeout(async () => {
+        this.alterFutureTimer = null;
+        if (this.game.playerAlteringFuture === playerId && this.game.alteringFutureCards.length > 0) {
+          try {
+            const action = await this.botController.takeTurn(playerId, this.botDifficulty);
+            if (action && action.type === 'CONFIRM_ALTER_FUTURE') {
+              await this.processAction(playerId, action);
+            } else {
+              // Fallback
+              await this.processAction(playerId, { type: 'CONFIRM_ALTER_FUTURE', reorderedCardIds: this.game.alteringFutureCards.map(c => c.id) });
+            }
+          } catch (e) {
+            console.error("[Bot Alter Future Error]", e);
+            await this.processAction(playerId, { type: 'CONFIRM_ALTER_FUTURE', reorderedCardIds: this.game.alteringFutureCards.map(c => c.id) });
+          }
+        }
+      }, 2000);
+      return;
+    }
+
     this.alterFutureTimer = setTimeout(async () => {
-      const playerId = this.game.playerAlteringFuture;
-      if (playerId && this.game.alteringFutureCards.length > 0) {
+      this.alterFutureTimer = null;
+      if (this.game.playerAlteringFuture === playerId && this.game.alteringFutureCards.length > 0) {
         console.log(`[GameEngineGateway] Alter future timed out for ${playerId}. Auto-confirming original order.`);
         // Auto-confirm with original order
         await this.processAction(playerId, { type: 'CONFIRM_ALTER_FUTURE', reorderedCardIds: this.game.alteringFutureCards.map(c => c.id) });
@@ -311,13 +317,19 @@ export class GameGateway {
     
     const player = this.game.players.find(p => p.id === playerId);
     
-    // If bot, auto-insert immediately (at a strategic position)
+    // If bot, query AI controller to insert strategically
     if (player?.isBot) {
       setTimeout(async () => {
         if (this.game.waitingForImplodingInsert === playerId) {
-          // Bot inserts at position 1 (just below top) to make next player draw it
-          const insertPos = Math.min(1, this.game.drawPile.length);
-          await this.processAction(playerId, { type: 'IMPLODE_INSERT', insertIndex: insertPos });
+          try {
+            const action = await this.botController.takeTurn(playerId, this.botDifficulty);
+            await this.processAction(playerId, action);
+          } catch (e) {
+            console.error("[Bot Imploding Insert Error]", e);
+            // Fallback: Bot inserts at position 1 (just below top) to make next player draw it
+            const insertPos = Math.min(1, this.game.drawPile.length);
+            await this.processAction(playerId, { type: 'IMPLODE_INSERT', insertIndex: insertPos });
+          }
         }
       }, 2000);
       return;
@@ -509,7 +521,16 @@ export class GameGateway {
     const currentPlayer = this.game.getCurrentPlayer();
     if (!currentPlayer || !currentPlayer.isBot || this.game.status !== 'PLAYING') return;
 
-    if (this.game.isInteractionPending()) {
+    const isOtherInteractionPending = !!(
+      this.game.pendingAction ||
+      this.game.waitingForTarget ||
+      this.game.waitingForSteal ||
+      this.game.waitingForFavor ||
+      this.game.playerSeeingFuture ||
+      this.game.playerAlteringFuture
+    );
+
+    if (isOtherInteractionPending) {
       console.log(`[GameEngineGateway] Bot turn paused because game has a pending interaction.`);
       return;
     }

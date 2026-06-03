@@ -133,7 +133,16 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
     
     // Only trigger popups for the initial play or a direct reaction (Nope), not the resolution message.
     // Resolution messages usually don't contain "played" or "NOPED".
-    const isInitialPlay = actionLower.includes('played') || action.includes('NOPED');
+    const isInitialPlay = (actionLower.includes('played') || action.includes('NOPED')) &&
+      !actionLower.includes('reversed') &&
+      !actionLower.includes('will draw from') &&
+      !actionLower.includes('drew from') &&
+      !actionLower.includes('was noped') &&
+      !actionLower.includes('skipped their') &&
+      !actionLower.includes('shuffled') &&
+      !actionLower.includes('stole a') &&
+      !actionLower.includes('successfully guessed') &&
+      !actionLower.includes('gave a card');
 
     // Special handling for Kittens (always show popups regardless of "played" keyword)
     if (actionLower.includes('kitten') || actionLower.includes('exploded') || actionLower.includes('eliminated')) {
@@ -352,7 +361,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
   
   // Late Nope opportunities (after action window has resolved)
   const isAttackOrSkipNopeable = !!gameState.lastNopeableAction &&
-    (gameState.lastNopeableAction.type === 'ATTACK' || gameState.lastNopeableAction.type === 'SKIP') &&
+    (gameState.lastNopeableAction.type === 'ATTACK' || gameState.lastNopeableAction.type === 'SKIP' || gameState.lastNopeableAction.type === 'REVERSE') &&
     gameState.currentPlayerId === socketId &&
     gameState.lastNopeableAction.initiatorId !== socketId;
 
