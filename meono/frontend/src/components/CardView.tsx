@@ -9,9 +9,10 @@ interface CardViewProps {
   disabled?: boolean;
   className?: string;
   layoutId?: string;
+  isStatic?: boolean;
 }
 
-export const CardView: React.FC<CardViewProps> = ({ card, onClick, disabled, className = "", layoutId }) => {
+export const CardView: React.FC<CardViewProps> = ({ card, onClick, disabled, className = "", layoutId, isStatic }) => {
   const baseSize = className.includes("w-") ? "" : "w-24 sm:w-32";
   const imagePath = card ? `/cards/${card.type}.png` : "";
   const [imgError, setImgError] = React.useState(false);
@@ -113,6 +114,53 @@ export const CardView: React.FC<CardViewProps> = ({ card, onClick, disabled, cla
       break;
   }
 
+  if (isStatic) {
+    return (
+      <button
+        onClick={onClick}
+        disabled={disabled}
+        className={`relative aspect-[2/3] ${baseSize} p-1.5 rounded-[1.5rem] border backdrop-blur-md shadow-[0_8px_15px_rgba(0,0,0,0.4)] group transition-colors duration-300 ${outerShell} ${disabled ? 'opacity-50 cursor-not-allowed grayscale-[40%]' : 'cursor-pointer'
+          } ${className}`}
+      >
+        <div className={`w-full h-full rounded-[1.125rem] bg-gradient-to-br flex flex-col items-center relative overflow-hidden ${innerCore}`}>
+          {!imgError ? (
+            <img 
+              src={imagePath}
+              alt={card ? card.name : ''}
+              className="absolute inset-0 w-full h-full object-cover z-10"
+              style={{ imageRendering: '-webkit-optimize-contrast' }}
+              onError={() => setImgError(true)}
+            />
+          ) : (
+            <div className="flex flex-col items-center w-full h-full p-2 z-10 relative">
+              <span className="font-black text-[10px] sm:text-xs uppercase tracking-widest text-center mt-3 z-10 leading-tight drop-shadow-sm px-1">
+                {card ? card.name : ''}
+              </span>
+              <div className="flex-1 flex items-center justify-center z-10 w-full relative">
+                <div className="text-4xl sm:text-6xl filter drop-shadow-[0_4px_8px_rgba(0,0,0,0.5)]">
+                  {card?.type === CardType.EXPLODING_KITTEN && "💣"}
+                  {card?.type === CardType.DEFUSE && "🛡️"}
+                  {card?.type === CardType.ATTACK && "⚔️"}
+                  {card?.type === CardType.SKIP && "⏭️"}
+                  {card?.type === CardType.NOPE && "🛑"}
+                  {card?.type === CardType.FAVOR && "🤲"}
+                  {(card?.type === CardType.SHUFFLE || card?.type === CardType.SEE_THE_FUTURE) && "👁️"}
+                  {card?.type?.includes('CAT_CARD') && "😺"}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Holographic Top Glare */}
+          <div className="absolute top-0 left-0 right-0 h-1/2 bg-gradient-to-b from-white/40 via-white/10 to-transparent rounded-t-[1.125rem] pointer-events-none mix-blend-overlay z-20"></div>
+
+          {/* Diagonal Sheen Pattern */}
+          <div className="absolute inset-0 opacity-10 bg-[repeating-linear-gradient(45deg,transparent,transparent_10px,rgba(255,255,255,0.5)_10px,rgba(255,255,255,0.5)_20px)] pointer-events-none z-20"></div>
+        </div>
+      </button>
+    );
+  }
+
   return (
     <motion.button
       layoutId={layoutId}
@@ -124,7 +172,7 @@ export const CardView: React.FC<CardViewProps> = ({ card, onClick, disabled, cla
         filter: "brightness(1.15)"
       } : {}}
       whileTap={!disabled ? { scale: 0.95 } : {}}
-      transition={{ type: 'spring', stiffness: 500, damping: 25 }}
+      transition={{ type: 'spring', stiffness: 85, damping: 17 }}
       onClick={onClick}
       disabled={disabled}
       className={`relative aspect-[2/3] ${baseSize} p-1.5 rounded-[1.5rem] border backdrop-blur-md shadow-[0_8px_15px_rgba(0,0,0,0.4)] group transition-colors duration-300 ${outerShell} ${disabled ? 'opacity-50 cursor-not-allowed grayscale-[40%]' : 'cursor-pointer'
@@ -136,7 +184,7 @@ export const CardView: React.FC<CardViewProps> = ({ card, onClick, disabled, cla
         {!imgError ? (
           <img 
             src={imagePath}
-            alt={card.name}
+            alt={card ? card.name : ''}
             className="absolute inset-0 w-full h-full object-cover z-10"
             style={{ imageRendering: '-webkit-optimize-contrast' }}
             onError={() => setImgError(true)}
@@ -144,7 +192,7 @@ export const CardView: React.FC<CardViewProps> = ({ card, onClick, disabled, cla
         ) : (
           <div className="flex flex-col items-center w-full h-full p-2 z-10 relative">
             <span className="font-black text-[10px] sm:text-xs uppercase tracking-widest text-center mt-3 z-10 leading-tight drop-shadow-sm px-1">
-              {card.name}
+              {card ? card.name : ''}
             </span>
             <div className="flex-1 flex items-center justify-center z-10 w-full relative">
               <motion.div 
@@ -152,14 +200,14 @@ export const CardView: React.FC<CardViewProps> = ({ card, onClick, disabled, cla
                 whileHover={{ scale: 1.1, rotate: [-2, 2, -2] }}
                 transition={{ repeat: Infinity, duration: 1 }}
               >
-                {card.type === CardType.EXPLODING_KITTEN && "💣"}
-                {card.type === CardType.DEFUSE && "🛡️"}
-                {card.type === CardType.ATTACK && "⚔️"}
-                {card.type === CardType.SKIP && "⏭️"}
-                {card.type === CardType.NOPE && "🛑"}
-                {card.type === CardType.FAVOR && "🤲"}
-                {(card.type === CardType.SHUFFLE || card.type === CardType.SEE_THE_FUTURE) && "👁️"}
-                {card.type.includes('CAT_CARD') && "😺"}
+                {card?.type === CardType.EXPLODING_KITTEN && "💣"}
+                {card?.type === CardType.DEFUSE && "🛡️"}
+                {card?.type === CardType.ATTACK && "⚔️"}
+                {card?.type === CardType.SKIP && "⏭️"}
+                {card?.type === CardType.NOPE && "🛑"}
+                {card?.type === CardType.FAVOR && "🤲"}
+                {(card?.type === CardType.SHUFFLE || card?.type === CardType.SEE_THE_FUTURE) && "👁️"}
+                {card?.type?.includes('CAT_CARD') && "😺"}
               </motion.div>
             </div>
           </div>

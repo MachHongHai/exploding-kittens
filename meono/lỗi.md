@@ -1,1 +1,0 @@
-aibot hard deck original không defuse nên bị nổ

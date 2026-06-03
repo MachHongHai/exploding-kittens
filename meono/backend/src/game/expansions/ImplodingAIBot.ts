@@ -46,7 +46,9 @@ export class ImplodingAIBot extends OriginalAIBot {
     const topCardOfDrawPile = this.game.drawPile[this.game.drawPile.length - 1];
     const isFaceUpBombOnTop = topCardOfDrawPile && topCardOfDrawPile.isFaceUp && ImplodingAIBot.isBomb(topCardOfDrawPile.type, true);
 
-    const isBombOnTop = isFaceUpBombOnTop || (knownTop.length > 0 && ImplodingAIBot.isBomb(knownTop[0].cardType, knownTop[0].isFaceUp)) || (this.game as any).isTopCardSuspect;
+    const lastDefuse = (this.game as any).lastDefuseAction;
+    const isHighlySuspect = (lastDefuse && lastDefuse.drawsSinceDefuse === 0) || (this.game as any).isTopCardSuspect;
+    const isBombOnTop = isFaceUpBombOnTop || (knownTop.length > 0 && ImplodingAIBot.isBomb(knownTop[0].cardType, knownTop[0].isFaceUp)) || isHighlySuspect;
 
     if (isBombOnTop) {
       const escapeAction = ImplodingAIBot.getExpansionEscapeAction(botId, this.game);

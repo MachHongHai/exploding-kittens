@@ -1263,44 +1263,63 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
           <div className="flex flex-col items-center">
             <div className="relative w-32 sm:w-40 h-48 sm:h-60">
               {gameState.discardPile.length === 0 ? null : (
-                gameState.discardPile.map((card, i) => {
-                  const isTop = i === gameState.discardPile.length - 1;
-                  const rotation = isTop ? 15 : ((i * 27) % 50) - 25;
-                  const xOffset = isTop ? 10 : ((i * 13) % 20) - 10;
-                  const yOffset = isTop ? -5 : ((i * 17) % 20) - 10;
-                  return (
-                    <motion.div 
-                      key={card.id + '-' + i} 
-                      className="absolute inset-0"
-                      initial={isTop ? { y: -80, scale: 0.6, opacity: 0, rotate: 0 } : false}
-                      animate={{ 
-                        y: yOffset,
-                        x: xOffset,
-                        scale: 1, 
-                        opacity: 1, 
-                        rotate: rotation,
-                      }}
-                      transition={{ 
-                        type: 'spring', 
-                        stiffness: 90, 
-                        damping: 15, 
-                        duration: 1.0,
-                      }}
-                      style={{ zIndex: i }}
-                    >
-                      {/* Brief glow effect on newest card */}
-                      {isTop && (
+                gameState.discardPile
+                  .map((card, i) => ({ card, i }))
+                  .map(({ card, i }) => {
+                    const isTop = i === gameState.discardPile.length - 1;
+                    const rotation = isTop ? 15 : ((i * 27) % 50) - 25;
+                    const xOffset = isTop ? 10 : ((i * 13) % 20) - 10;
+                    const yOffset = isTop ? -5 : ((i * 17) % 20) - 10;
+
+                    if (!isTop) {
+                      // Static rendering for background cards in the discard pile stack
+                      // This completely bypasses Framer Motion overhead, keeping rendering fast even with 40+ cards.
+                      return (
+                        <div 
+                          key={card.id + '-' + i} 
+                          className="absolute inset-0"
+                          style={{ 
+                            transform: `translate(${xOffset}px, ${yOffset}px) rotate(${rotation}deg)`,
+                            zIndex: i 
+                          }}
+                        >
+                          <CardView card={card} disabled={true} isStatic={true} className="w-32 sm:w-40 h-48 sm:h-60" />
+                        </div>
+                      );
+                    }
+
+                    // Animate only the top/newest card flying into the discard pile
+                    return (
+                      <motion.div 
+                        key={card.id + '-' + i} 
+                        className="absolute inset-0"
+                        initial={{ y: -120, scale: 0.6, opacity: 0, rotate: 0 }}
+                        animate={{ 
+                          y: yOffset,
+                          x: xOffset,
+                          scale: 1, 
+                          opacity: 1, 
+                          rotate: rotation,
+                        }}
+                        transition={{ 
+                          type: 'spring', 
+                          stiffness: 70, 
+                          damping: 15, 
+                          duration: 0.8,
+                        }}
+                        style={{ zIndex: i }}
+                      >
+                        {/* Brief glow effect on newest card */}
                         <motion.div 
                           className="absolute -inset-2 rounded-[1.4rem] bg-yellow-300/30 blur-md pointer-events-none"
                           initial={{ opacity: 0.8 }}
                           animate={{ opacity: 0 }}
                           transition={{ duration: 1.5, ease: 'easeOut' }}
                         />
-                      )}
-                      <CardView card={card} disabled={!isTop} layoutId={card.id} className="w-32 sm:w-40 h-48 sm:h-60" />
-                    </motion.div>
-                  )
-                })
+                        <CardView card={card} disabled={false} layoutId={card.id} className="w-32 sm:w-40 h-48 sm:h-60" />
+                      </motion.div>
+                    )
+                  })
               )}
             </div>
           </div>

@@ -36,11 +36,11 @@ export function createImplodingKittensDeck(playerCount: number): Card[] {
   addCards(CardType.NOPE, counts[CardType.NOPE], 'Nope', 'Stop any action except an Exploding Kitten or a Defuse card.');
   
   // Original Cat Cards
-  addCards(CardType.CAT_CARD_1, counts[CardType.CAT_CARD_1], 'Tacocat', 'Play as a pair to steal a random card.');
+  addCards(CardType.CAT_CARD_1, counts[CardType.CAT_CARD_1], 'Hairy Potato Cat', 'Play as a pair to steal a random card.');
   addCards(CardType.CAT_CARD_2, counts[CardType.CAT_CARD_2], 'Cattermelon', 'Play as a pair to steal a random card.');
-  addCards(CardType.CAT_CARD_3, counts[CardType.CAT_CARD_3], 'Hairy Potato Cat', 'Play as a pair to steal a random card.');
-  addCards(CardType.CAT_CARD_4, counts[CardType.CAT_CARD_4], 'Beard Cat', 'Play as a pair to steal a random card.');
-  addCards(CardType.CAT_CARD_5, counts[CardType.CAT_CARD_5], 'Rainbow-Ralphing Cat', 'Play as a pair to steal a random card.');
+  addCards(CardType.CAT_CARD_3, counts[CardType.CAT_CARD_3], 'Rainbow-Ralphing Cat', 'Play as a pair to steal a random card.');
+  addCards(CardType.CAT_CARD_4, counts[CardType.CAT_CARD_4], 'Tacocat', 'Play as a pair to steal a random card.');
+  addCards(CardType.CAT_CARD_5, counts[CardType.CAT_CARD_5], 'Beard Cat', 'Play as a pair to steal a random card.');
 
   // Imploding Kittens Expansion Cards (20 cards)
   addCards(CardType.FERAL_CAT, 4, 'Feral Cat', 'Use as any cat card.');
