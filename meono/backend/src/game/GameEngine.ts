@@ -72,7 +72,7 @@ export class GameEngine {
   public lastDefuseAction: { playerId: string; drawsSinceDefuse: number } | null = null;
   public bombCountdown: number | undefined;
   public lastNopeableAction: {
-    type: 'ATTACK' | 'SKIP' | 'FAVOR' | '2-CARD' | '3-CARD' | 'NOPE' | 'REVERSE';
+    type: 'ATTACK' | 'SKIP' | 'NOPE' | 'REVERSE';
     initiatorId: string;
     targetId: string;
     timestamp: number;
@@ -418,37 +418,6 @@ export class GameEngine {
       return { success: true };
     }
 
-    // Case 4: Recent card transfer flying animation (within 1000ms)
-    if (this.lastNopeableAction &&
-      (this.lastNopeableAction.type === '2-CARD' || this.lastNopeableAction.type === '3-CARD' || this.lastNopeableAction.type === 'FAVOR') &&
-      this.lastNopeableAction.targetId === playerId &&
-      Date.now() - this.lastNopeableAction.timestamp < 1000 &&
-      this.lastNopeableAction.stolenCard) {
-
-      player.removeCard(nopeCard.id);
-      this.discardPile.push(nopeCard);
-
-      // Revert card transfer
-      const { card, fromId, toId } = this.lastNopeableAction.stolenCard;
-      const receiver = this.players.find(p => p.id === toId);
-      const originalOwner = this.players.find(p => p.id === fromId);
-      if (receiver && originalOwner) {
-        receiver.removeCard(card.id);
-        originalOwner.drawCard(card);
-      }
-
-      // Pop the intermediate transfer log to avoid confusion
-      const lastLog = this.actionHistory[this.actionHistory.length - 1];
-      if (lastLog && (lastLog.includes('gave a card') || lastLog.includes('picked a card') || lastLog.includes('stole') || lastLog.includes('successfully guessed') || lastLog.includes('resolved'))) {
-        this.actionHistory.pop();
-      }
-
-      const initiator = this.players.find(p => p.id === this.lastNopeableAction!.initiatorId);
-      this.lastAction = `${player.name} NOPED and cancelled the card transfer from ${initiator?.name || 'opponent'}!`;
-      this.lastNopeableAction = null;
-      return { success: true };
-    }
-
     // Case 5: Attack/Skip/Reverse active turn change (current player plays Nope before drawing/playing)
     if (this.lastNopeableAction &&
       (this.lastNopeableAction.type === 'ATTACK' || this.lastNopeableAction.type === 'SKIP' || this.lastNopeableAction.type === 'REVERSE') &&
@@ -536,18 +505,6 @@ export class GameEngine {
             origPlayer.drawCard(stolenCard);
             this.lastAction = `${origPlayer.name} played a Pair and stole from ${target.name}.`;
             this.lastTheft = { stealerId: orig.playerId, victimId: target.id, cardId: stolenCard.id };
-
-            this.lastNopeableAction = {
-              type: '2-CARD',
-              initiatorId: orig.playerId,
-              targetId: target.id,
-              timestamp: Date.now(),
-              stolenCard: {
-                card: stolenCard,
-                fromId: target.id,
-                toId: orig.playerId
-              }
-            };
           }
         }
       } else if (orig.actionType === '3-CARD') {
@@ -560,18 +517,6 @@ export class GameEngine {
             origPlayer.drawCard(stolenCard);
             this.lastAction = `${origPlayer.name} successfully guessed ${orig.requestedCardType} from ${target.name}!`;
             this.lastTheft = { stealerId: orig.playerId, victimId: target.id, cardId: stolenCard.id };
-
-            this.lastNopeableAction = {
-              type: '3-CARD',
-              initiatorId: orig.playerId,
-              targetId: target.id,
-              timestamp: Date.now(),
-              stolenCard: {
-                card: stolenCard,
-                fromId: target.id,
-                toId: orig.playerId
-              }
-            };
           }
         }
       }
@@ -764,18 +709,6 @@ export class GameEngine {
           player.drawCard(stolenCard);
           this.lastAction = `${player.name} stole a card from ${target.name}.`;
           this.lastTheft = { stealerId: player.id, victimId: target.id, cardId: stolenCard.id };
-
-          this.lastNopeableAction = {
-            type: '2-CARD',
-            initiatorId: player.id,
-            targetId: target.id,
-            timestamp: Date.now(),
-            stolenCard: {
-              card: stolenCard,
-              fromId: target.id,
-              toId: player.id
-            }
-          };
         }
       }
     } else if (action.actionType === '3-CARD') {
@@ -787,18 +720,6 @@ export class GameEngine {
           player.drawCard(stolenCard);
           this.lastAction = `${player.name} successfully guessed and stole ${action.requestedCardType!.replace(/_/g, ' ')} from ${target.name}!`;
           this.lastTheft = { stealerId: player.id, victimId: target.id, cardId: stolenCard.id };
-
-          this.lastNopeableAction = {
-            type: '3-CARD',
-            initiatorId: player.id,
-            targetId: target.id,
-            timestamp: Date.now(),
-            stolenCard: {
-              card: stolenCard,
-              fromId: target.id,
-              toId: player.id
-            }
-          };
         } else {
           this.lastAction = `${player.name} guessed ${action.requestedCardType!.replace(/_/g, ' ')} from ${target.name} but guess was incorrect.`;
         }
@@ -816,18 +737,6 @@ export class GameEngine {
     this.lastAction = `${stealer.name} picked a card from ${victim.name}.`;
     this.lastTheft = { stealerId, victimId, cardId: card.id };
     this.waitingForSteal = null;
-
-    this.lastNopeableAction = {
-      type: '2-CARD',
-      initiatorId: stealerId,
-      targetId: victimId,
-      timestamp: Date.now(),
-      stolenCard: {
-        card,
-        fromId: victimId,
-        toId: stealerId
-      }
-    };
 
     return true;
   }
@@ -847,18 +756,6 @@ export class GameEngine {
     this.lastAction = `${victim.name} gave a card to ${requester.name} (Favor).`;
     this.lastTheft = { stealerId: requesterId, victimId, cardId: card.id };
     this.waitingForFavor = null;
-
-    this.lastNopeableAction = {
-      type: 'FAVOR',
-      initiatorId: requesterId,
-      targetId: victimId,
-      timestamp: Date.now(),
-      stolenCard: {
-        card,
-        fromId: victimId,
-        toId: requesterId
-      }
-    };
 
     return true;
   }

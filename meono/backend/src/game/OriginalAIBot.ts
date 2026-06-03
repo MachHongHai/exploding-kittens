@@ -1031,23 +1031,6 @@ ${historyDesc}
       }
     }
 
-    // Case 4: Recent card transfer flying animation (within 1000ms)
-    if ((lastAction.type === '2-CARD' || lastAction.type === '3-CARD' || lastAction.type === 'FAVOR') &&
-        lastAction.targetId === botId &&
-        Date.now() - lastAction.timestamp < 1000 &&
-        lastAction.stolenCard) {
-      
-      const stolen = lastAction.stolenCard.card;
-      // Nope the steal if it took a valuable card (Defuse/Nope) or if we have a small hand
-      if (stolen.type === CardType.DEFUSE || 
-          stolen.type === CardType.NOPE || 
-          player.handCount <= 3 || 
-          Math.random() < 0.4) {
-        console.log(`[AIBot - LateNope] Bot ${player.name} plays late Nope to cancel card transfer of ${stolen.name}.`);
-        return { type: 'PLAY_NOPE', cardId: nopeCard.id };
-      }
-    }
-
     return null;
   }
 

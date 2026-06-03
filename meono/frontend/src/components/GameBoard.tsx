@@ -369,20 +369,12 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
     gameState.lastNopeableAction.type === 'NOPE' &&
     gameState.lastNopeableAction.initiatorId !== socketId;
 
-  const isStealOrFavorNopeable = !!gameState.lastNopeableAction &&
-    (gameState.lastNopeableAction.type === '2-CARD' || 
-     gameState.lastNopeableAction.type === '3-CARD' || 
-     gameState.lastNopeableAction.type === 'FAVOR') &&
-    gameState.lastNopeableAction.targetId === socketId;
-  
   const isNopeOpportunity = !gameState.waitingForDefuse && !gameState.waitingForImplodingInsert && (
     isWindowActive || 
     (gameState.waitingForFavor?.victimId === socketId) || 
     (gameState.waitingForSteal?.victimId === socketId) || 
-    isBeingStolenFrom || 
     isAttackOrSkipNopeable ||
-    isResolvedNopeNopeable ||
-    isStealOrFavorNopeable
+    isResolvedNopeNopeable
   );
 
   const toggleCardSelection = (cardId: string) => {

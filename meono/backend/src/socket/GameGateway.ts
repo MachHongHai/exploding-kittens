@@ -488,33 +488,9 @@ export class GameGateway {
 
     if (this.game.status === 'PLAYING') {
       await this.checkBotTurn();
-      await this.checkBotLateNope();
     }
 
     return actionResult;
-  }
-
-  private async checkBotLateNope() {
-    if (!this.game.lastNopeableAction) return;
-    
-    const action = this.game.lastNopeableAction;
-    // We only care about Case 4 here (card transfers) because Case 5 and 6 are handled at the start of bot turns
-    if (action.type !== '2-CARD' && action.type !== '3-CARD' && action.type !== 'FAVOR') return;
-
-    const targetBot = this.game.players.find(p => p.id === action.targetId);
-    if (!targetBot || !targetBot.isBot || targetBot.isEliminated) return;
-
-    // React quickly (e.g. 300-600ms) to Nope within the 1-second flight window
-    const delay = Math.random() * 300 + 200; 
-    setTimeout(async () => {
-      // Re-verify action is still valid and unchanged
-      if (this.game.lastNopeableAction === action && this.game.status === 'PLAYING') {
-        const decision = this.botController.getLateNopeDecision(targetBot.id);
-        if (decision) {
-          await this.processAction(targetBot.id, decision);
-        }
-      }
-    }, delay);
   }
 
   private async checkBotTurn() {
