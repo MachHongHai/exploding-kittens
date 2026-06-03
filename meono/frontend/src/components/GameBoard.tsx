@@ -1283,7 +1283,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
                             zIndex: i 
                           }}
                         >
-                          <CardView card={card} disabled={true} isStatic={true} className="w-32 sm:w-40 h-48 sm:h-60" />
+                          <CardView card={card} disabled={false} isStatic={true} className="w-32 sm:w-40 h-48 sm:h-60 pointer-events-none" />
                         </div>
                       );
                     }
