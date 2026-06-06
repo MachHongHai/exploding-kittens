@@ -737,6 +737,7 @@ export class GameEngine {
     this.lastAction = `${stealer.name} picked a card from ${victim.name}.`;
     this.lastTheft = { stealerId, victimId, cardId: card.id };
     this.waitingForSteal = null;
+    this.lastNopeableAction = null; // Clear nopeable history
 
     return true;
   }
@@ -756,6 +757,7 @@ export class GameEngine {
     this.lastAction = `${victim.name} gave a card to ${requester.name} (Favor).`;
     this.lastTheft = { stealerId: requesterId, victimId, cardId: card.id };
     this.waitingForFavor = null;
+    this.lastNopeableAction = null; // Clear nopeable history
 
     return true;
   }

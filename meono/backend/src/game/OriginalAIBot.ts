@@ -812,7 +812,8 @@ ${historyDesc}
       // 2. Attack / Skip / Targeted Attack: Counter-nope to protect our turn-ending actions
       if (cardType === CardType.ATTACK || cardType === CardType.TARGETED_ATTACK || cardType === CardType.SKIP || cardType === CardType.DRAW_FROM_THE_BOTTOM) {
         const inDanger = isTopCardBomb || (!hasDefuse && deckSize <= lateGameThreshold);
-        if (inDanger || Math.random() < 0.5) {
+        // Reduce random counter-nope probability from 0.2 to 0.05 to save Nopes
+        if (inDanger || Math.random() < 0.05) {
           console.log(`[AIBot - Nope] Bot ${player.name} counter-nopes to save itself from drawing (Action: ${cardType}).`);
           return { type: 'PLAY_NOPE', cardId: nopeCard.id };
         }
@@ -824,7 +825,8 @@ ${historyDesc}
       if (action.actionType === '2-CARD' || action.actionType === '3-CARD') {
         const targetPlayer = this.game.players.find(p => p.id === action.targetId);
         const targetHasDefuse = targetPlayer?.hasDefuse();
-        if ((deckSize <= lateGameThreshold && !hasDefuse && targetHasDefuse) || Math.random() < 0.8) {
+        // Reduce random counter-nope probability from 0.35 to 0.08 to save Nopes
+        if ((deckSize <= lateGameThreshold && !hasDefuse && targetHasDefuse) || Math.random() < 0.08) {
           console.log(`[AIBot - Nope] Bot ${player.name} counter-nopes combo to protect its steal from ${targetPlayer?.name}.`);
           return { type: 'PLAY_NOPE', cardId: nopeCard.id };
         }
@@ -903,7 +905,8 @@ ${historyDesc}
       // Mid/Late game logic: Protect hand if small or late game
       const protectingDefuse = hasDefuse && handSize <= 3;
       const isLateGame = deckSize <= lateGameThreshold;
-      if (protectingDefuse || isLateGame || Math.random() < 0.3) {
+      const shouldNopeFavorOrCombo = protectingDefuse || (isLateGame && (handSize <= 4 || !hasDefuse)) || Math.random() < 0.01;
+      if (shouldNopeFavorOrCombo) {
         console.log(`[AIBot - Nope] Bot ${player.name} Nopes combo/favor from ${this.game.players.find(p => p.id === action.playerId)?.name} to protect its hand.`);
         return { type: 'PLAY_NOPE', cardId: nopeCard.id };
       }
@@ -929,17 +932,29 @@ ${historyDesc}
       }
 
       if (isTargetedOrNext) {
+        const hasEscape = player.hand.some(c => c.type === CardType.SKIP || c.type === CardType.ATTACK || c.type === CardType.REVERSE || c.type === CardType.DRAW_FROM_THE_BOTTOM);
+
         if (isEarlyGame) {
-          if (!hasDefuse && Math.random() < (cardType === CardType.TARGETED_ATTACK ? 0.10 : 0.20)) {
-            console.log(`[AIBot - Nope] Bot ${player.name} Nopes ${cardType} in early game due to no Defuse (Desperate fear).`);
+          // In early game, never Nope Attack/Targeted Attack unless we have NO Defuse AND NO escape cards, and even then, only 1-3% chance
+          if (!hasDefuse && !hasEscape && Math.random() < (cardType === CardType.TARGETED_ATTACK ? 0.01 : 0.03)) {
+            console.log(`[AIBot - Nope] Bot ${player.name} Nopes ${cardType} in early game due to no Defuse and no escape cards (Desperate fear).`);
             return { type: 'PLAY_NOPE', cardId: nopeCard.id };
           }
           return null;
         }
 
         if (!hasDefuse || deckSize <= lateGameThreshold) {
+          // If we have an escape card in hand, prefer using that on our turn instead of wasting a Nope!
+          if (hasEscape && Math.random() > 0.02) {
+            console.log(`[AIBot - Nope] Bot ${player.name} has escape card(s) in hand. Saving Nope and letting ${cardType} resolve.`);
+            return null;
+          }
+
+          // If we have Defuse, we should only Nope in late game or if we have very few cards left
           // If Targeted Attack, only Nope if really scared (since another player might be the target)
-          if (cardType === CardType.TARGETED_ATTACK && Math.random() > 0.4 && hasDefuse) return null;
+          if (cardType === CardType.TARGETED_ATTACK && Math.random() > 0.03 && hasDefuse) return null;
+          // If regular Attack and we have Defuse, we don't Nope if we have high hand size (save the Nope!)
+          if (cardType === CardType.ATTACK && hasDefuse && handSize > 2 && deckSize > lateGameThreshold) return null;
           
           console.log(`[AIBot - Nope] Bot ${player.name} Nopes ${cardType} from opponent due to danger.`);
           return { type: 'PLAY_NOPE', cardId: nopeCard.id };
@@ -976,7 +991,8 @@ ${historyDesc}
         const victimGrudge = targetPlayer ? this.getRevengeScore(botId, targetPlayer.id) : 0;
         const victimIsHated = victimGrudge > 10;
 
-        const colludeProb = victimIsHated ? 0 : Math.min(0.85, 0.2 + (leaderGrudge / 25));
+        // Lower collusion probability: base starts at 0.01 (was 0.05) and max is 0.12 (was 0.35)
+        const colludeProb = victimIsHated ? 0 : Math.min(0.12, 0.01 + (leaderGrudge / 100));
 
         if (shouldThirdPartyNope && activePlayer.handCount >= avgCards + 3 && Math.random() < colludeProb) {
           console.log(`[AIBot - Nope] Bot ${player.name} Nopes ${activePlayer.name}'s action due to Collusion/Leader Grudge (Grudge: ${leaderGrudge.toFixed(1)}, Victim Grudge: ${victimGrudge.toFixed(1)})!`);
@@ -998,6 +1014,9 @@ ${historyDesc}
     const lastAction = this.game.lastNopeableAction;
     const deckSize = this.game.drawPile.length;
     const hasDefuse = player.hasDefuse();
+    const hasEscape = player.hand.some(c => c.type === CardType.SKIP || c.type === CardType.ATTACK || c.type === CardType.REVERSE || c.type === CardType.DRAW_FROM_THE_BOTTOM);
+    const aliveCount = this.game.players.filter(p => !p.isEliminated).length;
+    const lateGameThreshold = Math.ceil(aliveCount * 2.5);
 
     // Case 5: Attack/Skip active turn change
     if ((lastAction.type === 'ATTACK' || lastAction.type === 'SKIP') &&
@@ -1005,12 +1024,13 @@ ${historyDesc}
         lastAction.initiatorId !== botId &&
         this.game.getCurrentPlayer().id === botId) {
       
-      const aliveCount = this.game.players.filter(p => !p.isEliminated).length;
-      const lateGameThreshold = Math.ceil(aliveCount * 2.5);
-      
-      // Nope the Attack/Skip if we are in danger (no Defuse or deck is late game) or 50% chance normally
-      if (!hasDefuse || deckSize <= lateGameThreshold || Math.random() < 0.5) {
-        console.log(`[AIBot - LateNope] Bot ${player.name} plays late Nope to revert the ${lastAction.type}.`);
+      // Only Nope the Attack/Skip if we are in danger (no Defuse or deck is late game) and no escape card, or 5% chance normally
+      if ((!hasDefuse || deckSize <= lateGameThreshold) && !hasEscape) {
+        console.log(`[AIBot - LateNope] Bot ${player.name} plays late Nope to revert the ${lastAction.type} (danger).`);
+        return { type: 'PLAY_NOPE', cardId: nopeCard.id };
+      }
+      if (Math.random() < 0.05) {
+        console.log(`[AIBot - LateNope] Bot ${player.name} plays late Nope to revert the ${lastAction.type} (random low probability).`);
         return { type: 'PLAY_NOPE', cardId: nopeCard.id };
       }
     }
@@ -1021,13 +1041,16 @@ ${historyDesc}
         lastAction.originalAction) {
       
       const orig = lastAction.originalAction;
-      // Re-nope to protect valuable plays (Attack, Skip, or Combos)
+      // Re-nope to protect valuable plays if in danger (no Defuse or deck is late game) and no escape card, or 5% chance normally
       if (orig.type === CardType.ATTACK || 
           orig.type === CardType.SKIP || 
           orig.actionType === '2-CARD' || 
           orig.actionType === '3-CARD') {
-        console.log(`[AIBot - LateNope] Bot ${player.name} plays late Nope to counter player's Nope on ${orig.type}.`);
-        return { type: 'PLAY_NOPE', cardId: nopeCard.id };
+        const inDanger = (!hasDefuse || deckSize <= lateGameThreshold) && !hasEscape;
+        if (inDanger || Math.random() < 0.05) {
+          console.log(`[AIBot - LateNope] Bot ${player.name} plays late Nope to counter player's Nope on ${orig.type}.`);
+          return { type: 'PLAY_NOPE', cardId: nopeCard.id };
+        }
       }
     }
 

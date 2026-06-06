@@ -160,8 +160,9 @@ export class GameGateway {
     this.game.players.filter(p => p.isBot).forEach(bot => {
       setTimeout(async () => {
         if (this.game.pendingAction && this.game.status === 'PLAYING') {
+           const initialActionId = this.game.pendingAction.actionId;
            const action = await this.botController.takeNopeDecision(bot.id, this.botDifficulty);
-           if (action) {
+           if (action && this.game.pendingAction && this.game.pendingAction.actionId === initialActionId && this.game.status === 'PLAYING') {
              await this.processAction(bot.id, action);
            }
         }
