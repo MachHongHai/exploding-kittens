@@ -39,6 +39,8 @@ export class BoardScene extends Phaser.Scene {
 
   private favorPawSprite: Phaser.GameObjects.Image | null = null;
   private isFavorAnimationRunning: boolean = false;
+  private newlyDrawnCardId: string | null = null;
+  private assignedPawAssetKey: string = '';
 
   constructor() {
     super('BoardScene');
@@ -47,6 +49,11 @@ export class BoardScene extends Phaser.Scene {
   create() {
     const width = this.cameras.main.width;
     const height = this.cameras.main.height;
+
+    // Assign a random paw from allowed list (3, 4, 5, 8, 9) for the entire match duration
+    const allowedPaws = [3, 4, 5, 8, 9];
+    const randomIndex = Phaser.Math.Between(0, allowedPaws.length - 1);
+    this.assignedPawAssetKey = `paw_${allowedPaws[randomIndex]}`;
 
     // 1. Draw deck & discard piles (center of the screen)
     this.setupCenterPiles();
@@ -96,159 +103,8 @@ export class BoardScene extends Phaser.Scene {
       drag.container.x += (drag.targetX - drag.container.x) * lerpPos;
       drag.container.y += (drag.targetY - drag.container.y) * lerpPos;
       drag.container.rotation += (drag.targetRotation - drag.container.rotation) * lerpRot;
-
-      // ----------------------------------------
-      // Draw Giant Cat Paw Arm (sleeve + stripes + wrist + toes + pink beans)
-      // ----------------------------------------
-      const targetX = drag.container.x;
-      const targetY = drag.container.y;
-      
-      const anchorX = 1920;
-      const anchorY = 1080;
-      
-      const dirX = targetX - anchorX;
-      const dirY = targetY - anchorY;
-      const totalLen = Math.sqrt(dirX * dirX + dirY * dirY);
-      
-      const ux = totalLen > 0 ? dirX / totalLen : -0.7;
-      const uy = totalLen > 0 ? dirY / totalLen : -0.7;
-      
-      // Keep a cute short sleeve length
-      const sleeveLen = 140; 
-      const startX = targetX - ux * sleeveLen;
-      const startY = targetY - uy * sleeveLen;
-      
-      const dx = targetX - startX;
-      const dy = targetY - startY;
-      const len = Math.sqrt(dx * dx + dy * dy);
-      
-      const g = this.dragArmGraphics;
-      g.clear();
-      
-      if (len > 30) {
-        // Perpendicular vector
-        const px = -uy;
-        const py = ux;
-        
-        // Sleeve widths (chubbier!)
-        const startWidth = 140;
-        const endWidth = 110;
-        
-        // Sleeve coordinates
-        const x1 = startX - px * startWidth * 0.5;
-        const y1 = startY - py * startWidth * 0.5;
-        const x2 = startX + px * startWidth * 0.5;
-        const y2 = startY + py * startWidth * 0.5;
-        
-        const x3 = targetX + px * endWidth * 0.5;
-        const y3 = targetY + py * endWidth * 0.5;
-        const x4 = targetX - px * endWidth * 0.5;
-        const y4 = targetY - py * endWidth * 0.5;
-        
-        // 1. Draw orange arm sleeve
-        g.fillStyle(0xe89849, 1);
-        g.lineStyle(7, 0x000000, 1);
-        
-        g.beginPath();
-        g.moveTo(x1, y1);
-        g.lineTo(x4, y4);
-        g.lineTo(x3, y3);
-        g.lineTo(x2, y2);
-        g.closePath();
-        g.fillPath();
-        g.strokePath();
-        
-        // 2. Draw brown stripes along the sleeve (2 stripes since sleeve is short)
-        const numStripes = 2;
-        g.fillStyle(0xb6652c, 1);
-        for (let i = 1; i <= numStripes; i++) {
-          const t = i / (numStripes + 1);
-          const w = startWidth + (endWidth - startWidth) * t;
-          const sx = startX + dx * t;
-          const sy = startY + dy * t;
-          
-          const sx1 = sx - px * w * 0.45 + ux * 10;
-          const sy1 = sy - py * w * 0.45 + uy * 10;
-          const sx2 = sx + px * w * 0.45 - ux * 10;
-          const sy2 = sy + py * w * 0.45 - uy * 10;
-          
-          g.lineStyle(5, 0x000000, 1);
-          g.beginPath();
-          g.moveTo(sx1 - ux * 10, sy1 - uy * 10);
-          g.lineTo(sx2 - ux * 10, sy2 - uy * 10);
-          g.lineTo(sx2 + ux * 10, sy2 + uy * 10);
-          g.lineTo(sx1 + ux * 10, sy1 + uy * 10);
-          g.closePath();
-          g.fillPath();
-          g.strokePath();
-        }
-        
-        // 3. Draw white paw (wrist base + 3 toes + pink pads)
-        const pawRadius = 52; // Chubbier!
-        const pawX = targetX;
-        const pawY = targetY; // Center on grab point
-        
-        // Sleeve border cover
-        g.fillStyle(0xe89849, 1);
-        g.fillCircle(pawX, pawY, endWidth * 0.5 - 2);
- 
-        // White hand base oval & toes
-        g.fillStyle(0xffffff, 1);
-        g.lineStyle(6, 0x000000, 1);
-        
-        // Toes fanning out in the direction of the arm
-        const toeOffsets = [
-          { angle: -0.35, dist: 38, r: 22 },
-          { angle: 0, dist: 45, r: 25 },
-          { angle: 0.35, dist: 38, r: 22 }
-        ];
-        
-        toeOffsets.forEach(toe => {
-          const angle = Math.atan2(uy, ux) + toe.angle;
-          const tx = pawX + Math.cos(angle) * toe.dist;
-          const ty = pawY + Math.sin(angle) * toe.dist;
-          g.fillCircle(tx, ty, toe.r);
-          g.strokeCircle(tx, ty, toe.r);
-        });
-        
-        // Main wrist base (white)
-        g.fillCircle(pawX, pawY, pawRadius);
-        g.strokeCircle(pawX, pawY, pawRadius);
-        
-        // Re-fill to merge wrist with toes
-        g.fillStyle(0xffffff, 1);
-        g.fillCircle(pawX, pawY, pawRadius - 3);
-        toeOffsets.forEach(toe => {
-          const angle = Math.atan2(uy, ux) + toe.angle;
-          const tx = pawX + Math.cos(angle) * toe.dist;
-          const ty = pawY + Math.sin(angle) * toe.dist;
-          g.fillCircle(tx, ty, toe.r - 3);
-        });
- 
-        // 4. Draw Cute Pink Beans Pads!
-        g.fillStyle(0xff9ebb, 1);
-        
-        // Toe pads
-        toeOffsets.forEach(toe => {
-          const angle = Math.atan2(uy, ux) + toe.angle;
-          const tx = pawX + Math.cos(angle) * toe.dist;
-          const ty = pawY + Math.sin(angle) * toe.dist;
-          g.fillCircle(tx, ty, toe.r * 0.55);
-        });
-        
-        // Main paw pad (chubby heart shape)
-        const padX = pawX - ux * 8;
-        const padY = pawY - uy * 8;
-        g.fillCircle(padX, padY, 26);
-        const lobeDist = 12;
-        const lobeAngle1 = Math.atan2(uy, ux) + Math.PI / 2 + 0.3;
-        const lobeAngle2 = Math.atan2(uy, ux) - Math.PI / 2 - 0.3;
-        g.fillCircle(padX + Math.cos(lobeAngle1) * lobeDist, padY + Math.sin(lobeAngle1) * lobeDist, 15);
-        g.fillCircle(padX + Math.cos(lobeAngle2) * lobeDist, padY + Math.sin(lobeAngle2) * lobeDist, 15);
-      }
-    } else {
-      this.dragArmGraphics.clear();
     }
+    this.dragArmGraphics.clear();
   }
 
   private cleanup() {
@@ -297,6 +153,10 @@ export class BoardScene extends Phaser.Scene {
     deckZone.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
       if (!this.isMyTurnToDraw()) return;
       
+      const startPointerX = pointer.x;
+      const startPointerY = pointer.y;
+      const startTime = this.time.now;
+
       // Prevent hand interaction
       this.isDrawingDragActive = true;
       
@@ -351,6 +211,16 @@ export class BoardScene extends Phaser.Scene {
           this.isDrawingDragActive = false;
         });
         
+        const elapsed = this.time.now - startTime;
+        const distMoved = Phaser.Math.Distance.Between(startPointerX, startPointerY, pointer.x, pointer.y);
+        const isClick = distMoved < 15 && elapsed < 250;
+
+        if (isClick) {
+          drawCardContainer.destroy();
+          this.drawCardAction();
+          return;
+        }
+
         // Check if released near the hand area (generous threshold y > 650)
         const isDroppedInHand = drawCardContainer.y > 650;
         
@@ -638,7 +508,9 @@ export class BoardScene extends Phaser.Scene {
         }
 
         const angle = Phaser.Math.Angle.Between(startX, startY, 960, 620) + Math.PI / 2;
-        this.favorPawSprite = this.add.image(startX, startY, `paw_${Phaser.Math.Between(1, 10)}`);
+        const allowedPaws = [3, 4, 5, 8, 9];
+        const randomPawId = allowedPaws[Phaser.Math.Between(0, allowedPaws.length - 1)];
+        this.favorPawSprite = this.add.image(startX, startY, `paw_${randomPawId}`);
         this.favorPawSprite.setDepth(98);
         this.favorPawSprite.setScale(0.85);
         this.favorPawSprite.setRotation(angle);
@@ -705,7 +577,19 @@ export class BoardScene extends Phaser.Scene {
       for (const prevPlayer of this.prevPlayersState) {
         const currPlayer = state.players.find((p: any) => p.id === prevPlayer.id);
         if (currPlayer && currPlayer.handCount > prevPlayer.handCount) {
-          this.animateCardDraw(currPlayer.id);
+          let newCardType: string | undefined = undefined;
+          let newCardId: string | undefined = undefined;
+          if (currPlayer.id === gameManager.socketId) {
+            const currentHand = currPlayer.hand || [];
+            const existingIds = new Set(this.localCards.map(c => c.getData('cardId')));
+            const newCard = currentHand.find((c: any) => !existingIds.has(c.id));
+            if (newCard) {
+              this.newlyDrawnCardId = newCard.id;
+              newCardType = newCard.type;
+              newCardId = newCard.id;
+            }
+          }
+          this.animateCardDraw(currPlayer.id, newCardType, newCardId);
           break;
         }
       }
@@ -1065,6 +949,11 @@ export class BoardScene extends Phaser.Scene {
       if (this.selectedCards.has(card.id)) {
         container.y -= 60;
         glow.setVisible(true);
+      }
+
+      // Check if this is the newly drawn card, hide it until the draw animation completes
+      if (card.id === this.newlyDrawnCardId) {
+        container.setVisible(false);
       }
     });
   }
@@ -1490,7 +1379,7 @@ export class BoardScene extends Phaser.Scene {
     });
   }
 
-  private animateCardDraw(playerId: string) {
+  private animateCardDraw(playerId: string, cardType?: string, cardId?: string) {
     const cx = 960;
     const cy = 495;
     const isLocal = playerId === gameManager.socketId;
@@ -1500,21 +1389,172 @@ export class BoardScene extends Phaser.Scene {
       return;
     }
 
+    if (isLocal) {
+      const deckX = cx - 150;
+      const deckY = cy;
+      const startX = deckX;
+
+      // Spawn the assigned paw sprite
+      const pawSprite = this.add.image(startX, 2000, this.assignedPawAssetKey);
+      pawSprite.setDepth(110);
+      pawSprite.setOrigin(0.5, 1.0); // bottom center (wrist)
+      
+      // Scale paw dynamically so its height is exactly 720px to keep wrist off-screen
+      const targetHeight = 720;
+      const scale = targetHeight / pawSprite.height;
+      pawSprite.setScale(scale);
+      pawSprite.setRotation(0); // Straight vertical alignment
+
+      // Start the paw completely off-screen (below 1080)
+      const startY = 1080 + targetHeight;
+      pawSprite.y = startY;
+
+      // Claws grab point is around 0.13 from the top of the paw.
+      // So distance from wrist (origin 1.0) to grab point is (1.0 - 0.13) = 0.87 of targetHeight.
+      // We want the claws grab point to land exactly at deckY (cy)
+      const targetY = deckY + 0.87 * targetHeight;
+
+      this.tweens.add({
+        targets: pawSprite,
+        y: targetY,
+        duration: 500, // Snappy yet smooth rise duration
+        ease: 'Sine.easeInOut', // Gentler easing curve than Cubic
+        onComplete: () => {
+          // Paw does a soft, realistic contraction grab (less violent than before)
+          this.tweens.add({
+            targets: pawSprite,
+            scaleX: scale * 1.15,
+            scaleY: scale * 1.15,
+            duration: 75, // Snappy grab pulse
+            yoyo: true,
+            repeat: 0,
+            onComplete: () => {
+              const tempContainer = this.add.container(deckX, deckY);
+              tempContainer.setDepth(100);
+              tempContainer.setRotation(0); // Straight vertical card, no rotation
+
+              // Create backGroup to hold card back graphics
+              const backGroup = this.add.container(0, 0);
+              const cbBg = this.add.graphics();
+              cbBg.fillStyle(0xffffff, 1);
+              cbBg.fillRoundedRect(-100, -140, 200, 280, 24);
+              cbBg.lineStyle(1.5, 0x000000, 0.45);
+              cbBg.strokeRoundedRect(-100, -140, 200, 280, 24);
+              cbBg.fillStyle(0x8b1a28, 1);
+              cbBg.fillRoundedRect(-96, -136, 192, 272, 20);
+
+              const cbImg = this.add.image(0, 0, 'CARD_BACK');
+              cbImg.setDisplaySize(250, 52.2);
+              cbImg.setRotation(Math.PI / 2);
+              backGroup.add([cbBg, cbImg]);
+
+              // Create frontGroup to hold front graphics (initially hidden)
+              const frontGroup = this.add.container(0, 0);
+              const frontBg = this.add.graphics();
+              frontBg.fillStyle(0xffffff, 1);
+              frontBg.fillRoundedRect(-100, -140, 200, 280, 24);
+              frontBg.lineStyle(1.5, 0x000000, 0.45);
+              frontBg.strokeRoundedRect(-100, -140, 200, 280, 24);
+              
+              const frontSprite = this.add.image(0, 0, cardType || 'CARD_BACK');
+              frontSprite.setDisplaySize(200, 280);
+              frontGroup.add([frontBg, frontSprite]);
+              frontGroup.setVisible(false);
+
+              tempContainer.add([backGroup, frontGroup]);
+
+              const targetScaleX = 220 / 200;
+              const targetScaleY = 308 / 280;
+
+              // Retract the paw back to the bottom vertically (X stays deckX)
+              this.tweens.add({
+                targets: pawSprite,
+                y: startY, // Pull completely off-screen Y
+                duration: 800, // Faster, elegant retract duration
+                ease: 'Sine.easeInOut',
+                onUpdate: (tween, target: Phaser.GameObjects.Image) => {
+                  if (tempContainer.active) {
+                    // Lock position completely to the paw's claws vertically at deckX (810)
+                    tempContainer.x = deckX;
+                    // Lock the card's Y to the claw grab point of the paw dynamically
+                    tempContainer.y = target.y - 0.87 * targetHeight;
+                    
+                    // Scale the card container as it approaches the hand
+                    const progress = tween.progress; // 0 to 1
+                    tempContainer.scaleX = 1 + (targetScaleX - 1) * progress;
+                    tempContainer.scaleY = 1 + (targetScaleY - 1) * progress;
+                  }
+                },
+                onComplete: () => {
+                  pawSprite.destroy();
+                  tempContainer.destroy();
+                  
+                  if (cardId) {
+                    const handCard = this.localCards.find(c => c.getData('cardId') === cardId);
+                    if (handCard) {
+                      handCard.setVisible(true);
+                      const originalX = handCard.getData('originalX') ?? handCard.x;
+                      const originalY = handCard.getData('originalY') ?? handCard.y;
+                      const rotation = handCard.rotation;
+                      
+                      const offsetDist = 35; // Offset distance along fanned line
+                      handCard.x = originalX + Math.sin(rotation) * offsetDist;
+                      handCard.y = originalY + Math.cos(rotation) * offsetDist;
+
+                      this.tweens.add({
+                        targets: handCard,
+                        x: originalX,
+                        y: originalY,
+                        duration: 250, // Snappy slide in
+                        ease: 'Cubic.easeOut'
+                      });
+                    }
+                    if (this.newlyDrawnCardId === cardId) {
+                      this.newlyDrawnCardId = null;
+                    }
+                  }
+                }
+              });
+
+              // Card Flip Animation: half-way down the pull
+              this.time.delayedCall(150, () => {
+                if (tempContainer.active) {
+                  this.tweens.add({
+                    targets: backGroup,
+                    scaleX: 0,
+                    duration: 150,
+                    ease: 'Quad.easeIn',
+                    onComplete: () => {
+                      backGroup.setVisible(false);
+                      frontGroup.setScale(0, 1);
+                      frontGroup.setVisible(true);
+                      this.tweens.add({
+                        targets: frontGroup,
+                        scaleX: 1,
+                        duration: 150,
+                        ease: 'Quad.easeOut'
+                      });
+                    }
+                  });
+                }
+              });
+            }
+          });
+        }
+      });
+      return;
+    }
+
     let targetX = cx;
     let targetY = cy;
 
-    if (isLocal) {
-      targetX = 960;
-      targetY = 870;
+    const oppContainer = this.opponentContainers.get(playerId);
+    if (oppContainer) {
+      targetX = oppContainer.x;
+      targetY = oppContainer.y;
     } else {
-      const oppContainer = this.opponentContainers.get(playerId);
-      if (oppContainer) {
-        targetX = oppContainer.x;
-        targetY = oppContainer.y;
-      } else {
-        targetX = 960;
-        targetY = 150;
-      }
+      targetX = 960;
+      targetY = 150;
     }
 
     const tempContainer = this.add.container(cx - 150, cy);
@@ -1536,8 +1576,8 @@ export class BoardScene extends Phaser.Scene {
 
     tempContainer.add([cbBg, cbImg]);
 
-    const targetScaleX = isLocal ? 220 / 200 : 54 / 200;
-    const targetScaleY = isLocal ? 308 / 280 : 76 / 280;
+    const targetScaleX = 54 / 200;
+    const targetScaleY = 76 / 280;
 
     this.tweens.add({
       targets: tempContainer,
@@ -1545,7 +1585,7 @@ export class BoardScene extends Phaser.Scene {
       y: targetY,
       scaleX: targetScaleX,
       scaleY: targetScaleY,
-      rotation: isLocal ? 0 : 15 * Math.PI / 180,
+      rotation: 15 * Math.PI / 180,
       duration: 400,
       ease: 'Cubic.easeOut',
       onComplete: () => {

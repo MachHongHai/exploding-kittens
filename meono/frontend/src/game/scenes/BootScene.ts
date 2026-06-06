@@ -56,9 +56,10 @@ export class BootScene extends Phaser.Scene {
       this.load.image(`explosion_${i}`, `assets/explosion/explosion_${i}.png`);
     }
 
-    // Load cat paw frames
-    for (let i = 1; i <= 10; i++) {
+    // Load cat paw frames (only 3, 4, 5, 8, 9)
+    const allowedPaws = [3, 4, 5, 8, 9];
+    allowedPaws.forEach((i) => {
       this.load.image(`paw_${i}`, `assets/paws/paw_${i}.png`);
-    }
+    });
   }
 }
