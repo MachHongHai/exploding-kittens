@@ -1392,34 +1392,42 @@ export class BoardScene extends Phaser.Scene {
     if (isLocal) {
       const deckX = cx - 150;
       const deckY = cy;
-      const startX = deckX;
+      // Entry from bottom-left corner offset (diagonal trajectory)
+      const startX = deckX - 250;
 
-      // Spawn the assigned paw sprite
-      const pawSprite = this.add.image(startX, 2000, this.assignedPawAssetKey);
-      pawSprite.setDepth(110);
-      pawSprite.setOrigin(0.5, 1.0); // bottom center (wrist)
-      
       // Scale paw dynamically so its height is exactly 720px to keep wrist off-screen
       const targetHeight = 720;
-      const scale = targetHeight / pawSprite.height;
-      pawSprite.setScale(scale);
-      pawSprite.setRotation(0); // Straight vertical alignment
 
       // Start the paw completely off-screen (below 1080)
       const startY = 1080 + targetHeight;
-      pawSprite.y = startY;
+
+      // Spawn the assigned paw sprite
+      const pawSprite = this.add.image(startX, startY, this.assignedPawAssetKey);
+      pawSprite.setDepth(110);
+      pawSprite.setOrigin(0.5, 1.0); // bottom center (wrist)
+      
+      const scale = targetHeight / pawSprite.height;
+      pawSprite.setScale(scale);
 
       // Claws grab point is around 0.13 from the top of the paw.
       // So distance from wrist (origin 1.0) to grab point is (1.0 - 0.13) = 0.87 of targetHeight.
       // We want the claws grab point to land exactly at deckY (cy)
       const targetY = deckY + 0.87 * targetHeight;
 
+      // Calculate diagonal angle pointing from start to target, aligned with vertical sprite pointing up
+      const angle = Phaser.Math.Angle.Between(startX, startY, deckX, targetY) + Math.PI / 2;
+      pawSprite.setRotation(angle);
+
       this.tweens.add({
         targets: pawSprite,
+        x: deckX,
         y: targetY,
         duration: 500, // Snappy yet smooth rise duration
         ease: 'Sine.easeInOut', // Gentler easing curve than Cubic
         onComplete: () => {
+          // Swap texture to grabbed paw version when grabbing
+          pawSprite.setTexture(`${this.assignedPawAssetKey}_grab`);
+
           // Paw does a soft, realistic contraction grab (less violent than before)
           this.tweens.add({
             targets: pawSprite,
@@ -1431,7 +1439,7 @@ export class BoardScene extends Phaser.Scene {
             onComplete: () => {
               const tempContainer = this.add.container(deckX, deckY);
               tempContainer.setDepth(100);
-              tempContainer.setRotation(0); // Straight vertical card, no rotation
+              tempContainer.setRotation(angle); // Tilt card to match paw angle
 
               // Create backGroup to hold card back graphics
               const backGroup = this.add.container(0, 0);
@@ -1469,15 +1477,15 @@ export class BoardScene extends Phaser.Scene {
               // Retract the paw back to the bottom vertically (X stays deckX)
               this.tweens.add({
                 targets: pawSprite,
+                x: startX,
                 y: startY, // Pull completely off-screen Y
                 duration: 800, // Faster, elegant retract duration
                 ease: 'Sine.easeInOut',
                 onUpdate: (tween, target: Phaser.GameObjects.Image) => {
                   if (tempContainer.active) {
-                    // Lock position completely to the paw's claws vertically at deckX (810)
-                    tempContainer.x = deckX;
-                    // Lock the card's Y to the claw grab point of the paw dynamically
-                    tempContainer.y = target.y - 0.87 * targetHeight;
+                    // Lock position to the projected claws grab point of the paw dynamically
+                    tempContainer.x = target.x + Math.sin(angle) * (0.87 * targetHeight);
+                    tempContainer.y = target.y - Math.cos(angle) * (0.87 * targetHeight);
                     
                     // Scale the card container as it approaches the hand
                     const progress = tween.progress; // 0 to 1
@@ -1500,11 +1508,13 @@ export class BoardScene extends Phaser.Scene {
                       const offsetDist = 35; // Offset distance along fanned line
                       handCard.x = originalX + Math.sin(rotation) * offsetDist;
                       handCard.y = originalY + Math.cos(rotation) * offsetDist;
+                      handCard.setRotation(angle); // start at paw tilt
 
                       this.tweens.add({
                         targets: handCard,
                         x: originalX,
                         y: originalY,
+                        rotation: rotation, // transition into hand fanned rotation
                         duration: 250, // Snappy slide in
                         ease: 'Cubic.easeOut'
                       });
@@ -1924,6 +1934,11 @@ export class BoardScene extends Phaser.Scene {
         }
 
         if (this.favorPawSprite) {
+          const currentTextureKey = this.favorPawSprite.texture.key;
+          if (currentTextureKey && !currentTextureKey.endsWith('_grab')) {
+            this.favorPawSprite.setTexture(`${currentTextureKey}_grab`);
+          }
+
           this.tweens.add({
             targets: this.favorPawSprite,
             scaleX: 0.95,
