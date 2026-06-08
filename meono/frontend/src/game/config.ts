@@ -11,12 +11,15 @@ export const getGameConfig = (parent: HTMLElement): Phaser.Types.Core.GameConfig
     mode: Phaser.Scale.FIT,
     autoCenter: Phaser.Scale.CENTER_BOTH,
   },
-  pixelArt: false,
-  roundPixels: true,
-  antialias: true,
-  antialiasGL: true,
   resolution: window.devicePixelRatio || 1,
   transparent: true,
+  render: {
+    antialias: true,
+    antialiasGL: true,
+    pixelArt: false,
+    roundPixels: true,
+    mipmapFilter: 'LINEAR_MIPMAP_LINEAR'
+  },
   scene: [BootScene, BoardScene],
   physics: {
     default: 'arcade',

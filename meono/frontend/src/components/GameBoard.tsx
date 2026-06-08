@@ -663,7 +663,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, socketId, onAct
       </div>
 
       {/* 3. Bottom Controls: Player Info, Fanned Hand, Nope Button */}
-      <div className="relative z-20 w-full flex flex-col items-center justify-end pb-2 bg-gradient-to-t from-black/90 via-black/75 to-transparent pt-12 overflow-visible pointer-events-none">
+      <div className="relative z-20 w-full flex flex-col items-center justify-end pb-2 bg-gradient-to-t from-black/20 via-black/5 to-transparent pt-12 overflow-visible pointer-events-none">
         
         {/* Action and Turn Notifications floating above the hand */}
         <div className="absolute -top-14 pointer-events-none w-full flex flex-col items-center justify-center">

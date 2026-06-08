@@ -788,35 +788,9 @@ export class BoardScene extends Phaser.Scene {
       const sprite = this.add.image(0, 0, card.type);
       sprite.setDisplaySize(220, 308);
       
-      // Prettier Glow Border (for selection) - Multi-layered glowing golden-cyan design
+      // Keep an empty glow container to avoid breaking references in the code structure
       const glow = this.add.container(0, 0);
-      
-      const outerGlow = this.add.graphics();
-      outerGlow.lineStyle(16, 0x00ffcc, 0.35);
-      outerGlow.strokeRoundedRect(-117, -161, 234, 322, 26);
-      
-      const goldGlow = this.add.graphics();
-      goldGlow.lineStyle(8, 0xffd700, 0.75);
-      goldGlow.strokeRoundedRect(-114, -158, 228, 316, 24);
-      
-      const innerGlow = this.add.graphics();
-      innerGlow.lineStyle(3, 0xffffff, 0.95);
-      innerGlow.strokeRoundedRect(-111, -155, 222, 310, 21);
-
-      glow.add([outerGlow, goldGlow, innerGlow]);
       glow.setVisible(false);
-
-      // Add elegant pulsing micro-animation to the glow border
-      this.tweens.add({
-        targets: glow,
-        alpha: { start: 0.7, to: 1.0 },
-        scaleX: { start: 0.98, to: 1.02 },
-        scaleY: { start: 0.98, to: 1.02 },
-        duration: 900,
-        yoyo: true,
-        repeat: -1,
-        ease: 'Sine.easeInOut'
-      });
 
       container.add([backing, glow, sprite]);
       this.localCards.push(container);
@@ -1392,8 +1366,8 @@ export class BoardScene extends Phaser.Scene {
     if (isLocal) {
       const deckX = cx - 150;
       const deckY = cy;
-      // Entry from bottom-left corner offset (diagonal trajectory)
-      const startX = deckX - 250;
+      // Entry from bottom-right corner offset (diagonal trajectory from right to left)
+      const startX = deckX + 250;
 
       // Scale paw dynamically so its height is exactly 720px to keep wrist off-screen
       const targetHeight = 720;
@@ -1409,18 +1383,20 @@ export class BoardScene extends Phaser.Scene {
       const scale = targetHeight / pawSprite.height;
       pawSprite.setScale(scale);
 
-      // Claws grab point is around 0.13 from the top of the paw.
-      // So distance from wrist (origin 1.0) to grab point is (1.0 - 0.13) = 0.87 of targetHeight.
-      // We want the claws grab point to land exactly at deckY (cy)
-      const targetY = deckY + 0.87 * targetHeight;
+      // Distance from wrist (origin 1.0) to claws grab point (around 0.13 from top) is 0.87 * targetHeight
+      const grabDistance = 0.87 * targetHeight;
 
       // Calculate diagonal angle pointing from start to target, aligned with vertical sprite pointing up
-      const angle = Phaser.Math.Angle.Between(startX, startY, deckX, targetY) + Math.PI / 2;
+      const angle = Phaser.Math.Angle.Between(startX, startY, deckX, deckY) + Math.PI / 2;
       pawSprite.setRotation(angle);
+
+      // Offset the target position of the wrist (paw center/bottom) so the claws land EXACTLY at deckX, deckY
+      const targetX = deckX - Math.sin(angle) * grabDistance;
+      const targetY = deckY + Math.cos(angle) * grabDistance;
 
       this.tweens.add({
         targets: pawSprite,
-        x: deckX,
+        x: targetX,
         y: targetY,
         duration: 500, // Snappy yet smooth rise duration
         ease: 'Sine.easeInOut', // Gentler easing curve than Cubic
